@@ -1274,16 +1274,20 @@ function handleEmptyContainerDrop(container, draggingElement, placeholder) {
 function setupTabDragHandlers(tabElement) {
     tabElement.addEventListener('dragstart', () => {
         tabElement.classList.add('dragging');
+        // Track the source folder (if any) so we can resync collapsed-folder projections after drop.
+        dragSourceFolderElement = tabElement.closest('.folder');
     });
 
     tabElement.addEventListener('dragend', () => {
         tabElement.classList.remove('dragging');
+        dragSourceFolderElement = null;
     });
 }
 
 // Variables for folder auto-open functionality
 let folderOpenTimer = null;
 let currentHoveredFolder = null;
+let dragSourceFolderElement = null;
 
 // Helper function to programmatically open a folder
 function openFolder(folderElement) {
@@ -1301,6 +1305,9 @@ function openFolder(folderElement) {
     if (folderIcon) {
     updateFolderIcon(folderElement);
     }
+
+    // If this folder had "collapsed open tabs" projected, move them back into content now that it's open.
+    syncCollapsedFolderTabs(folderElement);
 }
 
 // Helper function to start auto-open timer for a folder
@@ -1733,39 +1740,36 @@ async function handleBookmarkOperations(event, draggingElement, container, targe
 
                     // Check if bookmark already exists in the target folder
                     const existingBookmarks = await chrome.bookmarks.getChildren(parentId);
-                    if (BookmarkUtils.findBookmarkByUrl(existingBookmarks, tab.url)) {
+                    const bookmarkAlreadyInTarget = Boolean(BookmarkUtils.findBookmarkByUrl(existingBookmarks, tab.url));
+                    if (bookmarkAlreadyInTarget) {
                         Logger.log('Bookmark already exists in folder:', folderName);
-                        return;
                     }
 
-                    // Find and remove the bookmark from its original location
-                    await BookmarkUtils.removeBookmarkByUrl(spaceFolder.id, tab.url);
-
-                    // Create the bookmark in the new location
-                    await chrome.bookmarks.create({
-                        parentId: parentId,
-                        title: tab.title,
-                        url: tab.url
-                    });
-
-                    // Move DOM element to target folder content
-                    const targetFolderContent = targetFolderElement.querySelector('.folder-content');
-                    if (targetFolderContent && draggingElement) {
-                        Logger.log("Moving DOM element to target folder content");
-
-                        // Remove from current location and append to target folder
-                        const sourceFolder = draggingElement.closest('.folder');
-                        draggingElement.remove();
-                        targetFolderContent.appendChild(draggingElement);
-
-                        // Update placeholder states for both source and target folders
-                        if (sourceFolder && sourceFolder !== targetFolderElement) {
-                            updateFolderPlaceholder(sourceFolder);
-                            Logger.log("Updated source folder placeholder state");
+                    // Ensure we don't show duplicate UI entries for the same URL inside the folder:
+                    // if the folder already has a bookmark-only item for this URL, remove it when dropping an open tab.
+                    const targetFolderContentEl = targetFolderElement.querySelector('.folder-content');
+                    if (targetFolderContentEl && !isBookmarkOnly && tab?.url) {
+                        const esc = (s) => (typeof CSS !== 'undefined' && CSS.escape) ? CSS.escape(s) : s.replace(/"/g, '\\"');
+                        const dupe = targetFolderContentEl.querySelector(`.tab.bookmark-only[data-url="${esc(tab.url)}"]`);
+                        if (dupe && dupe !== draggingElement) {
+                            dupe.remove();
                         }
-                        Logger.log("Updated target folder placeholder state");
                     }
-                    // Always update placeholder for targetFolder
+
+                    // Only move the bookmark in Chrome bookmarks if it's not already in the target folder.
+                    if (!bookmarkAlreadyInTarget) {
+                        // Find and remove the bookmark from its original location
+                        await BookmarkUtils.removeBookmarkByUrl(spaceFolder.id, tab.url);
+
+                        // Create the bookmark in the new location
+                        await chrome.bookmarks.create({
+                            parentId: parentId,
+                            title: tab.title,
+                            url: tab.url
+                        });
+                    }
+
+                    // Keep folder placeholder state accurate (DOM was already positioned by drop handler).
                     updateFolderPlaceholder(targetFolderElement);
                 } else {
                     await moveTabToPinned(space, tab);
@@ -2152,7 +2156,19 @@ async function setupDragAndDrop(pinnedContainer, tempContainer) {
             const draggingElement = document.querySelector('.dragging');
             if (draggingElement) {
                 const droppedTabId = draggingElement.dataset.tabId ? parseInt(draggingElement.dataset.tabId) : null;
-                const targetFolder = e.target.closest('.folder-content');
+                // If dropping on a folder header / collapsed folder area, treat it as dropping into that folder.
+                let targetFolder = e.target.closest('.folder-content');
+                let targetFolderElement = targetFolder ? targetFolder.closest('.folder') : null;
+
+                if (!targetFolder) {
+                    const folderUnderPointer = e.target.closest('.folder');
+                    if (folderUnderPointer) {
+                        openFolder(folderUnderPointer); // ensures folder is expanded and projections are synced
+                        targetFolderElement = folderUnderPointer;
+                        targetFolder = folderUnderPointer.querySelector('.folder-content');
+                    }
+                }
+
                 const targetContainer = targetFolder || container;
 
                 // Calculate drop position using same logic as indicators
@@ -2186,6 +2202,14 @@ async function setupDragAndDrop(pinnedContainer, tempContainer) {
 
                 // Handle bookmark operations after DOM positioning is complete
                 await handleBookmarkOperations(e, draggingElement, container, targetFolder);
+
+                // Resync collapsed-folder projections/icons after move (source + destination)
+                if (dragSourceFolderElement) {
+                    syncCollapsedFolderTabs(dragSourceFolderElement);
+                }
+                if (targetFolderElement && targetFolderElement !== dragSourceFolderElement) {
+                    syncCollapsedFolderTabs(targetFolderElement);
+                }
 
                 // Update the model from the DOM (Arcify is source of truth here), then reconcile Chrome.
                 // This is intentionally done after bookmark operations so section membership is correct.
