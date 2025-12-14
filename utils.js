@@ -62,6 +62,19 @@ const Utils = {
         return url.toString();
     },
 
+    // URL comparison key for pinned tabs:
+    // intentionally ignore query params + hash to avoid treating benign changes (e.g. Google Docs) as "navigated away".
+    getPinnedUrlKey: function (url) {
+        if (!url) return '';
+        try {
+            const u = new URL(url);
+            return `${u.origin}${u.pathname}`;
+        } catch {
+            // Fallback for non-standard URLs
+            return String(url).split('#')[0].split('?')[0];
+        }
+    },
+
     getSettings: async function () {
         const defaultSettings = {
             defaultSpaceName: 'Home',

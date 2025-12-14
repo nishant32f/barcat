@@ -2396,7 +2396,10 @@ async function loadTabs(space, pinnedContainer, tempContainer) {
     Logger.log('Loading tabs for space:', space.id);
     Logger.log('Space bookmarks in space:', space.spaceBookmarks);
 
-    var bookmarkedTabURLs = [];
+    // Track which *tabIds* are already represented in the pinned bookmarks UI so we don't double-render them
+    // in the temporary section. We intentionally avoid URL-key based exclusion here because multiple open
+    // tabs can share the same base URL (e.g. abc.com?x=y and abc.com?x=z).
+    const representedPinnedTabIds = new Set();
     try {
         const invertTabOrder = await Utils.getInvertTabOrder();
         const tabs = await chrome.tabs.query({});
@@ -2507,12 +2510,21 @@ async function loadTabs(space, pinnedContainer, tempContainer) {
                     } else {
                         // This is a bookmark
                         if (!processedUrls.has(item.url) && !pinnedUrls.has(item.url)) {
-                            // Prefer exact URL match first; if the tab navigated away, fall back to pinned state mapping.
-                            const existingTab = BookmarkUtils.findTabByUrl(tabs, item.url) ||
-                                tabs.find(t => pinnedStatesById?.[t.id]?.pinnedUrl === item.url);
+                            // Choose ONE open tab (if any) to represent this bookmark:
+                            // 1) Strongest: pinned state points to this bookmarkId
+                            // 2) Exact URL match
+                            // 3) Base URL match (origin+pathname), but only if not already used for another bookmark
+                            const byBookmarkId = tabs.find(t => pinnedStatesById?.[t.id]?.bookmarkId === item.id);
+                            const byExactUrl = BookmarkUtils.findTabByUrl(tabs, item.url);
+                            const byBaseUrl = tabs.find(t =>
+                                t?.id &&
+                                !representedPinnedTabIds.has(t.id) &&
+                                Utils.getPinnedUrlKey(t.url) === Utils.getPinnedUrlKey(item.url)
+                            );
+                            const existingTab = byBookmarkId || byExactUrl || byBaseUrl;
                             if (existingTab) {
                                 Logger.log('Creating UI element for active bookmark:', existingTab);
-                                bookmarkedTabURLs.push(item.url); // Track pinned/bookmark URL (not the navigated URL)
+                                representedPinnedTabIds.add(existingTab.id);
                                 existingTab.pinnedUrl = item.url;
                                 existingTab.bookmarkId = item.id;
                                 const tabElement = await createTabElement(existingTab, true);
@@ -2531,7 +2543,6 @@ async function loadTabs(space, pinnedContainer, tempContainer) {
                                 };
                                 Logger.log('Creating UI element for inactive bookmark:', item);
                                 const tabElement = await createTabElement(bookmarkTab, true, true);
-                                bookmarkedTabURLs.push(item.url);
                                 container.appendChild(tabElement);
                             }
                             processedUrls.add(item.url);
@@ -2543,11 +2554,11 @@ async function loadTabs(space, pinnedContainer, tempContainer) {
                         }
                     }
                 }
-                return bookmarkedTabURLs;
+                return;
             }
 
             // Process the space folder and get all bookmarked URLs
-            bookmarkedTabURLs = await processBookmarkNode(spaceFolder, pinnedContainer);
+            await processBookmarkNode(spaceFolder, pinnedContainer);
         }
 
 
@@ -2561,10 +2572,10 @@ async function loadTabs(space, pinnedContainer, tempContainer) {
         tabsToLoad.forEach(async tabId => {
             Logger.log("checking", tabId, spaces);
             const tab = tabs.find(t => t.id === tabId);
-            const pinned = bookmarkedTabURLs.find(url => url == tab.url);
-            Logger.log("pinned", pinned);
+            const representedAsPinned = representedPinnedTabIds.has(tabId);
+            Logger.log("representedAsPinned", representedAsPinned);
 
-            if (tab && pinned == null) {
+            if (tab && !representedAsPinned) {
                 const tabElement = await createTabElement(tab);
                 tempContainer.appendChild(tabElement);
             }
@@ -2782,7 +2793,7 @@ async function createTabElement(tab, isPinned = false, isBookmarkOnly = false) {
         const canBackToPinned = async () => {
             const pinnedUrl = await computePinnedUrl();
             const currentUrl = computeCurrentUrl();
-            return Boolean(pinnedUrl && currentUrl && currentUrl !== pinnedUrl);
+            return Boolean(pinnedUrl && currentUrl && Utils.getPinnedUrlKey(currentUrl) !== Utils.getPinnedUrlKey(pinnedUrl));
         };
 
         const setBackButtonState = async () => {
@@ -2844,7 +2855,7 @@ async function createTabElement(tab, isPinned = false, isBookmarkOnly = false) {
         // For space-pinned tabs: only force the bookmark/override title when we're still on the pinned URL.
         // If the tab navigates away, show the real page title (Arc-like).
         const pinnedUrl = (isPinned ? (tabElement.dataset.pinnedUrl || pinnedUrlForTab) : null);
-        const isNavigatedAway = Boolean(isPinned && pinnedUrl && tab.url && tab.url !== pinnedUrl);
+        const isNavigatedAway = Boolean(isPinned && pinnedUrl && tab.url && Utils.getPinnedUrlKey(tab.url) !== Utils.getPinnedUrlKey(pinnedUrl));
 
         if (override && !isNavigatedAway) {
             displayTitle = override.name;
@@ -2852,7 +2863,7 @@ async function createTabElement(tab, isPinned = false, isBookmarkOnly = false) {
         }
 
         // Domain subtitle: only show when navigated away from the pinned domain.
-        if (isPinned && pinnedUrl && tab.url && tab.url !== pinnedUrl) {
+        if (isPinned && pinnedUrl && tab.url && Utils.getPinnedUrlKey(tab.url) !== Utils.getPinnedUrlKey(pinnedUrl)) {
             try {
                 const pinnedDomain = new URL(pinnedUrl).hostname;
                 const currentDomain = new URL(tab.url).hostname;
@@ -3365,7 +3376,7 @@ function handleTabUpdate(tabId, changeInfo, tab) {
                     Logger.log('override', override); // Log the override object here
                     let displayDomain = null;
                     const pinnedUrl = tabElement.dataset.pinnedUrl || (await Utils.getPinnedTabState(tabId))?.pinnedUrl || null;
-                    const isNavigatedAway = Boolean(pinnedUrl && tab.url && tab.url !== pinnedUrl);
+                    const isNavigatedAway = Boolean(pinnedUrl && tab.url && Utils.getPinnedUrlKey(tab.url) !== Utils.getPinnedUrlKey(pinnedUrl));
 
                     // Only force override title when we're still on the pinned URL.
                     if (override && !isNavigatedAway) {
@@ -3405,7 +3416,7 @@ function handleTabUpdate(tabId, changeInfo, tab) {
                 tabElement.dataset.url = tab.url;
                 if (tabElement.closest('[data-tab-type="pinned"]')) {
                     const pinnedUrl = tabElement.dataset.pinnedUrl || (await Utils.getPinnedTabState(tabId))?.pinnedUrl;
-                    const shouldEnableBack = Boolean(pinnedUrl && tab.url && tab.url !== pinnedUrl);
+                    const shouldEnableBack = Boolean(pinnedUrl && tab.url && Utils.getPinnedUrlKey(tab.url) !== Utils.getPinnedUrlKey(pinnedUrl));
                     faviconElement.classList.toggle('pinned-back', shouldEnableBack);
                     faviconElement.title = shouldEnableBack ? 'Back to Pinned URL' : '';
                     const slash = tabElement.querySelector('.tab-url-changed-slash');
