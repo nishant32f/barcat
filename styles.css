@@ -832,6 +832,38 @@ h3 {
     margin-right: 8px;
 }
 
+/* Arc-like: when a pinned tab has navigated away, favicon becomes a back-to-pinned button */
+.tab-favicon.pinned-back {
+    cursor: pointer;
+    padding: 4px;
+    margin: -4px 4px -4px -4px; /* keep layout stable despite padding */
+    border-radius: 6px;
+    transition: background-color 0.12s ease, transform 0.12s ease;
+}
+
+.tab-favicon.pinned-back:hover {
+    background-color: rgba(0, 0, 0, 0.10);
+}
+
+.tab.active .tab-favicon.pinned-back:hover {
+    background-color: rgba(0, 0, 0, 0.14);
+}
+
+/* Arc-like: "/" indicator next to favicon when pinned URL has changed */
+.tab-url-changed-slash {
+    display: none;
+    margin-right: 6px;
+    margin-left: -2px;
+    font-size: 12px;
+    line-height: 1;
+    opacity: 0.7;
+    user-select: none;
+}
+
+.tab-url-changed-slash.visible {
+    display: inline-block;
+}
+
 
 .tab-details {
     flex-grow: 1;
@@ -892,6 +924,11 @@ h3 {
     margin-top: 2px;
     /* Space below title */
     font-weight: 800;
+}
+
+.tab-domain-display.back-to-pinned {
+    font-weight: 600;
+    opacity: 0.75;
 }
 
 .tab-title {

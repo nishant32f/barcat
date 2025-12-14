@@ -117,6 +117,43 @@ const Utils = {
         }
     },
 
+    // --- Pinned (Space Bookmark) Tab State ---
+    // Tracks the original "pinned/bookmark URL" for a pinned tab, even if the user navigates away.
+    // Keyed by ephemeral tabId (per session) which is sufficient for Arc-like "Back to Pinned URL".
+    getPinnedTabStates: async function () {
+        const result = await chrome.storage.local.get('pinnedTabStatesById');
+        return result.pinnedTabStatesById || {};
+    },
+
+    savePinnedTabStates: async function (states) {
+        await chrome.storage.local.set({ pinnedTabStatesById: states || {} });
+    },
+
+    getPinnedTabState: async function (tabId) {
+        if (!tabId) return null;
+        const states = await this.getPinnedTabStates();
+        return states[tabId] || null;
+    },
+
+    setPinnedTabState: async function (tabId, state) {
+        if (!tabId || !state) return;
+        const states = await this.getPinnedTabStates();
+        states[tabId] = {
+            pinnedUrl: state.pinnedUrl || null,
+            bookmarkId: state.bookmarkId || null
+        };
+        await this.savePinnedTabStates(states);
+    },
+
+    removePinnedTabState: async function (tabId) {
+        if (!tabId) return;
+        const states = await this.getPinnedTabStates();
+        if (states[tabId]) {
+            delete states[tabId];
+            await this.savePinnedTabStates(states);
+        }
+    },
+
     getTabGroupColor: async function (groupName) {
         let tabGroups = await chrome.tabGroups.query({});
 

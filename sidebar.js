@@ -53,20 +53,113 @@ async function updateBookmarkForTab(tab, bookmarkTitle) {
 
     for (const spaceFolder of spaceFolders) {
         Logger.log("looking for space folder", spaceFolder);
+        // Prefer stored mapping (tabId -> bookmarkId) so we can update even if the tab navigated away.
+        const pinnedState = await Utils.getPinnedTabState(tab.id);
+        if (pinnedState?.bookmarkId) {
+            try {
+                await chrome.bookmarks.update(pinnedState.bookmarkId, { title: bookmarkTitle });
+                return;
+            } catch (e) {
+                Logger.warn('[Bookmarks] Failed updating bookmark by stored bookmarkId, falling back to URL search.', e);
+            }
+        }
+
+        // Fallback: search by pinned URL (not tab.url!) and only update title.
+        const pinnedUrl = pinnedState?.pinnedUrl;
+        if (!pinnedUrl) continue;
         const bookmarks = await chrome.bookmarks.getChildren(spaceFolder.id);
         Logger.log("looking for bookmarks", bookmarks);
-        const bookmark = BookmarkUtils.findBookmarkByUrl(bookmarks, tab.url);
+        const bookmark = BookmarkUtils.findBookmarkByUrl(bookmarks, pinnedUrl);
         if (bookmark) {
-            await chrome.bookmarks.update(bookmark.id, {
-                title: bookmarkTitle,
-                url: tab.url
-            });
+            await chrome.bookmarks.update(bookmark.id, { title: bookmarkTitle });
+            await Utils.setPinnedTabState(tab.id, { bookmarkId: bookmark.id, pinnedUrl: pinnedUrl });
+            return;
         }
     }
 
 }
 
-Logger.log("hi");
+async function replaceBookmarkUrlWithCurrentUrl(tab, tabElement) {
+    if (!tab?.id) return;
+
+    // Always prefer the live tab URL (the `tab` object captured by the UI can be stale).
+    let liveTab = null;
+    try {
+        liveTab = await chrome.tabs.get(tab.id);
+    } catch (e) {
+        // We'll fall back to dataset/tab url below.
+    }
+
+    const newUrl = liveTab?.url || tabElement?.dataset?.url || tab?.url || null;
+    if (!newUrl) {
+        console.warn('[Arcify] Replace bookmark URL failed: missing current tab URL', { tabId: tab.id });
+        return;
+    }
+    const newTitle = liveTab?.title || tab?.title || null;
+
+    const stored = await Utils.getPinnedTabState(tab.id);
+    const bookmarkId = tabElement?.dataset?.bookmarkId || stored?.bookmarkId;
+    const pinnedUrl = tabElement?.dataset?.pinnedUrl || stored?.pinnedUrl;
+
+    // If we don't know the bookmarkId, try resolving by pinnedUrl within the current space folder.
+    let resolvedBookmarkId = bookmarkId;
+    if (!resolvedBookmarkId && pinnedUrl) {
+        const activeSpace = spaces.find(s => s.id === activeSpaceId);
+        if (activeSpace) {
+            const arcifyFolder = await LocalStorage.getOrCreateArcifyFolder();
+            const spaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
+            const spaceFolder = spaceFolders.find(f => f.title === activeSpace.name);
+            if (spaceFolder) {
+                const result = await BookmarkUtils.findBookmarkInFolderRecursive(spaceFolder.id, { url: pinnedUrl });
+                resolvedBookmarkId = result?.bookmark?.id || null;
+            }
+        }
+    }
+
+    if (!resolvedBookmarkId) {
+        console.warn('[Arcify] Cannot replace bookmark URL: missing bookmarkId and unable to resolve.', {
+            tabId: tab.id,
+            pinnedUrl,
+            dataset: tabElement?.dataset
+        });
+        return;
+    }
+
+    try {
+        const updatePayload = { url: newUrl };
+        // Keep bookmark title in sync with the new pinned page for clarity.
+        if (newTitle) updatePayload.title = newTitle;
+        await chrome.bookmarks.update(resolvedBookmarkId, updatePayload);
+    } catch (e) {
+        console.error('[Arcify] chrome.bookmarks.update failed', { bookmarkId: resolvedBookmarkId, newUrl, error: e });
+        return;
+    }
+
+    await Utils.setPinnedTabState(tab.id, { bookmarkId: resolvedBookmarkId, pinnedUrl: newUrl });
+    if (newTitle) {
+        // Update override baseline (and pinned display) to the new URL/title.
+        await Utils.setTabNameOverride(tab.id, newUrl, newTitle);
+    }
+
+    if (tabElement) {
+        tabElement.dataset.pinnedUrl = newUrl;
+        tabElement.dataset.url = newUrl;
+        // Tab is now pinned to current URL; "back to pinned" should no longer be available.
+        const favicon = tabElement.querySelector('.tab-favicon') || tabElement.querySelector('img');
+        if (favicon) {
+            favicon.classList.remove('pinned-back');
+            favicon.title = '';
+        }
+        const slash = tabElement.querySelector('.tab-url-changed-slash');
+        if (slash) slash.classList.remove('visible');
+
+        // Ensure the displayed title + domain subtitle reflect the new pinned URL immediately.
+        const titleDisplay = tabElement.querySelector('.tab-title-display');
+        if (titleDisplay && newTitle) titleDisplay.textContent = newTitle;
+        const domainDisplay = tabElement.querySelector('.tab-domain-display');
+        if (domainDisplay) domainDisplay.style.display = 'none';
+    }
+}
 
 // Function to apply color overrides from settings
 async function applyColorOverrides() {
@@ -373,7 +466,9 @@ async function activatePinnedTabByURL(bookmarkUrl, targetSpaceId, spaceName) {
             const bookmarkData = {
                 url: bookmarkUrl,
                 title: bookmarkTitle || 'Bookmark',
-                spaceName: spaceName
+                spaceName: spaceName,
+                pinnedUrl: bookmarkUrl,
+                bookmarkId: existingBookmarkElement?.dataset?.bookmarkId || null
             };
 
             // Prepare context for BookmarkUtils
@@ -1363,16 +1458,21 @@ async function moveTabToPinned(space, tab) {
     const spaceFolder = await LocalStorage.getOrCreateSpaceFolder(space.name);
     const bookmarks = await chrome.bookmarks.getChildren(spaceFolder.id);
     const existingBookmark = BookmarkUtils.findBookmarkByUrl(bookmarks, tab.url);
+    let bookmarkIdToStore = existingBookmark?.id || null;
     if (!existingBookmark) {
         // delete existing bookmark
         await BookmarkUtils.removeBookmarkByUrl(spaceFolder.id, tab.url);
 
-        await chrome.bookmarks.create({
+        const created = await chrome.bookmarks.create({
             parentId: spaceFolder.id,
             title: tab.title,
             url: tab.url
         });
+        bookmarkIdToStore = created?.id || null;
     }
+
+    // Track the original pinned URL for Arc-like "Back to Pinned URL" behavior.
+    await Utils.setPinnedTabState(tab.id, { pinnedUrl: tab.url, bookmarkId: bookmarkIdToStore });
 
     // Update chevron state after moving tab to pinned
     const spaceElement = document.querySelector(`[data-space-id="${space.id}"]`);
@@ -1402,6 +1502,9 @@ async function moveTabToTemp(space, tab) {
     if (!space.temporaryTabs.includes(tab.id)) {
         space.temporaryTabs.push(tab.id);
     }
+
+    // No longer a space-pinned tab; clear pinned state mapping.
+    await Utils.removePinnedTabState(tab.id);
 
     saveSpaces();
 
@@ -2226,6 +2329,7 @@ async function loadTabs(space, pinnedContainer, tempContainer) {
     try {
         const invertTabOrder = await Utils.getInvertTabOrder();
         const tabs = await chrome.tabs.query({});
+        const pinnedStatesById = await Utils.getPinnedTabStates();
         const pinnedTabs = await chrome.tabs.query({ pinned: true });
         const pinnedUrls = new Set(pinnedTabs.map(tab => tab.url));
 
@@ -2328,10 +2432,14 @@ async function loadTabs(space, pinnedContainer, tempContainer) {
                     } else {
                         // This is a bookmark
                         if (!processedUrls.has(item.url) && !pinnedUrls.has(item.url)) {
-                            const existingTab = BookmarkUtils.findTabByUrl(tabs, item.url);
+                            // Prefer exact URL match first; if the tab navigated away, fall back to pinned state mapping.
+                            const existingTab = BookmarkUtils.findTabByUrl(tabs, item.url) ||
+                                tabs.find(t => pinnedStatesById?.[t.id]?.pinnedUrl === item.url);
                             if (existingTab) {
                                 Logger.log('Creating UI element for active bookmark:', existingTab);
-                                bookmarkedTabURLs.push(existingTab.url);
+                                bookmarkedTabURLs.push(item.url); // Track pinned/bookmark URL (not the navigated URL)
+                                existingTab.pinnedUrl = item.url;
+                                existingTab.bookmarkId = item.id;
                                 const tabElement = await createTabElement(existingTab, true);
                                 Logger.log('Appending tab element to container:', tabElement);
                                 container.appendChild(tabElement);
@@ -2342,7 +2450,9 @@ async function loadTabs(space, pinnedContainer, tempContainer) {
                                     title: item.title,
                                     url: item.url,
                                     favIconUrl: null,
-                                    spaceName: space.name
+                                    spaceName: space.name,
+                                    pinnedUrl: item.url,
+                                    bookmarkId: item.id
                                 };
                                 Logger.log('Creating UI element for inactive bookmark:', item);
                                 const tabElement = await createTabElement(bookmarkTab, true, true);
@@ -2535,6 +2645,8 @@ async function createTabElement(tab, isPinned = false, isBookmarkOnly = false) {
     if (isBookmarkOnly) {
         tabElement.classList.add('inactive', 'bookmark-only');
         tabElement.dataset.url = tab.url;
+        if (tab.pinnedUrl) tabElement.dataset.pinnedUrl = tab.pinnedUrl;
+        if (tab.bookmarkId) tabElement.dataset.bookmarkId = tab.bookmarkId;
     } else {
         tabElement.dataset.tabId = tab.id;
         tabElement.dataset.url = tab.url;
@@ -2551,6 +2663,26 @@ async function createTabElement(tab, isPinned = false, isBookmarkOnly = false) {
     const titleInput = tabElement.querySelector('.tab-title-input');
     const actionButton = tabElement.querySelector('.tab-close');
 
+    // Arc-like visual indicator: "/" shown next to favicon when pinned URL has changed.
+    let urlChangedSlash = tabElement.querySelector('.tab-url-changed-slash');
+    if (!urlChangedSlash) {
+        urlChangedSlash = document.createElement('span');
+        urlChangedSlash.className = 'tab-url-changed-slash';
+        urlChangedSlash.textContent = '/';
+        favicon.insertAdjacentElement('afterend', urlChangedSlash);
+    }
+
+    // Track pinned URL + bookmarkId for Arc-like behavior (only for space-pinned, active tabs).
+    let pinnedUrlForTab = null;
+    if (isPinned && !isBookmarkOnly && tab?.id) {
+        const stored = await Utils.getPinnedTabState(tab.id);
+        pinnedUrlForTab = tab.pinnedUrl || stored?.pinnedUrl || tab.url;
+        const bookmarkIdForTab = tab.bookmarkId || stored?.bookmarkId || null;
+        tabElement.dataset.pinnedUrl = pinnedUrlForTab;
+        if (bookmarkIdForTab) tabElement.dataset.bookmarkId = bookmarkIdForTab;
+        await Utils.setPinnedTabState(tab.id, { pinnedUrl: pinnedUrlForTab, bookmarkId: bookmarkIdForTab });
+    }
+
     // Set up favicon
     favicon.src = Utils.getFaviconUrl(tab.url);
     favicon.classList.add('tab-favicon');
@@ -2558,6 +2690,47 @@ async function createTabElement(tab, isPinned = false, isBookmarkOnly = false) {
         favicon.src = tab.favIconUrl;
         favicon.onerror = () => { favicon.src = 'assets/default_icon.png'; }; // Fallback favicon
     }; // Fallback favicon
+
+    // Arc-like: clicking the favicon takes you back to the pinned URL (if navigated away).
+    if (isPinned && !isBookmarkOnly) {
+        const computePinnedUrl = async () => {
+            const stored = tab?.id ? await Utils.getPinnedTabState(tab.id) : null;
+            return tabElement.dataset.pinnedUrl || tab.pinnedUrl || stored?.pinnedUrl || tab.url || null;
+        };
+
+        // IMPORTANT: always prefer the dataset URL (kept fresh by handleTabUpdate) over the captured `tab.url`
+        // to avoid stale comparisons after navigation.
+        const computeCurrentUrl = () => tabElement.dataset.url || tab.url || null;
+
+        const canBackToPinned = async () => {
+            const pinnedUrl = await computePinnedUrl();
+            const currentUrl = computeCurrentUrl();
+            return Boolean(pinnedUrl && currentUrl && currentUrl !== pinnedUrl);
+        };
+
+        const setBackButtonState = async () => {
+            const enabled = await canBackToPinned();
+            favicon.classList.toggle('pinned-back', enabled);
+            favicon.title = enabled ? 'Back to Pinned URL' : '';
+            urlChangedSlash.classList.toggle('visible', enabled);
+        };
+
+        await setBackButtonState();
+
+        favicon.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            if (!tab?.id) return;
+            try {
+                const pinnedUrl = await computePinnedUrl();
+                if (!pinnedUrl) return;
+                const current = await chrome.tabs.get(tab.id);
+                if (!current?.url || current.url === pinnedUrl) return;
+                await chrome.tabs.update(tab.id, { url: pinnedUrl, active: true });
+            } catch (err) {
+                Logger.warn('[PinnedTab] Failed to navigate back to pinned URL:', err);
+            }
+        });
+    }
 
     // Set up action button
     actionButton.classList.remove('tab-close');
@@ -2591,13 +2764,22 @@ async function createTabElement(tab, isPinned = false, isBookmarkOnly = false) {
 
         titleInput.value = tab.title; // Default input value is current tab title
 
-        if (override) {
+        // For space-pinned tabs: only force the bookmark/override title when we're still on the pinned URL.
+        // If the tab navigates away, show the real page title (Arc-like).
+        const pinnedUrl = (isPinned ? (tabElement.dataset.pinnedUrl || pinnedUrlForTab) : null);
+        const isNavigatedAway = Boolean(isPinned && pinnedUrl && tab.url && tab.url !== pinnedUrl);
+
+        if (override && !isNavigatedAway) {
             displayTitle = override.name;
             titleInput.value = override.name; // Set input value to override name
+        }
+
+        // Domain subtitle: only show when navigated away from the pinned domain.
+        if (isPinned && pinnedUrl && tab.url && tab.url !== pinnedUrl) {
             try {
-                // Check if current domain differs from original override domain
+                const pinnedDomain = new URL(pinnedUrl).hostname;
                 const currentDomain = new URL(tab.url).hostname;
-                if (override.originalDomain && currentDomain !== override.originalDomain) {
+                if (currentDomain && pinnedDomain && currentDomain !== pinnedDomain) {
                     displayDomain = currentDomain;
                 }
             } catch (e) {
@@ -2608,8 +2790,10 @@ async function createTabElement(tab, isPinned = false, isBookmarkOnly = false) {
         titleDisplay.textContent = displayTitle;
         if (displayDomain) {
             domainDisplay.textContent = displayDomain;
+            domainDisplay.classList.remove('back-to-pinned');
             domainDisplay.style.display = 'block';
         } else {
+            domainDisplay.classList.remove('back-to-pinned');
             domainDisplay.style.display = 'none';
         }
 
@@ -2643,13 +2827,13 @@ async function createTabElement(tab, isPinned = false, isBookmarkOnly = false) {
                     if (newName && newName !== originalTitle) {
                         await Utils.setTabNameOverride(tab.id, tab.url, newName);
                         if (isPinned) {
-                            await BookmarkUtils.updateBookmarkTitle(tab, activeSpace, newName);
+                            await updateBookmarkForTab(tab, newName);
                         }
                     } else {
                         // If name is empty or same as original, remove override
                         await Utils.removeTabNameOverride(tab.id);
                         if (isPinned) {
-                            await BookmarkUtils.updateBookmarkTitle(tab, activeSpace, originalTitle);
+                            await updateBookmarkForTab(tab, originalTitle);
                         }
                     }
                 } catch (error) {
@@ -2730,6 +2914,12 @@ async function createTabElement(tab, isPinned = false, isBookmarkOnly = false) {
                         chrome.tabs.update(existingTab.id, { active: true });
                         activateTabInDOM(existingTab.id);
 
+                        if (isPinned) {
+                            const pinnedUrl = tabElement.dataset.pinnedUrl || tabUrl;
+                            const bookmarkId = tabElement.dataset.bookmarkId || null;
+                            await Utils.setPinnedTabState(existingTab.id, { pinnedUrl: pinnedUrl, bookmarkId: bookmarkId });
+                        }
+
                         // Update space data if needed
                         const space = spaces.find(s => s.id === existingTab.groupId);
                         if (space) {
@@ -2795,6 +2985,13 @@ async function createTabElement(tab, isPinned = false, isBookmarkOnly = false) {
                             await reconcileSpaceTabOrdering(targetSpaceId, { source: 'arcify', movedTabId: restoredTab.id });
 
                             // Replace the element with the active tab element
+                            if (isPinned) {
+                                const pinnedUrl = tabElement.dataset.pinnedUrl || tabUrl;
+                                const bookmarkId = tabElement.dataset.bookmarkId || null;
+                                restoredTab.pinnedUrl = pinnedUrl;
+                                restoredTab.bookmarkId = bookmarkId;
+                                await Utils.setPinnedTabState(restoredTab.id, { pinnedUrl: pinnedUrl, bookmarkId: bookmarkId });
+                            }
                             const updatedTabElement = await createTabElement(restoredTab, isPinned, false);
                             tabElement.replaceWith(updatedTabElement);
                             isOpeningBookmark = false;
@@ -2823,7 +3020,9 @@ async function createTabElement(tab, isPinned = false, isBookmarkOnly = false) {
                     const bookmarkData = {
                         url: tabUrl,
                         title: bookmarkTitle,
-                        spaceName: tab.spaceName || space.name
+                        spaceName: tab.spaceName || space.name,
+                        pinnedUrl: tabElement.dataset.pinnedUrl || tabUrl,
+                        bookmarkId: tabElement.dataset.bookmarkId || null
                     };
 
                     // Prepare context for BookmarkUtils
@@ -2868,7 +3067,21 @@ async function createTabElement(tab, isPinned = false, isBookmarkOnly = false) {
         e.preventDefault();
         const arcifyFolder = await LocalStorage.getOrCreateArcifyFolder();
         const allBookmarkSpaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
-        showTabContextMenu(e.pageX, e.pageY, tab, isPinned, isBookmarkOnly, tabElement, closeTab, spaces, moveTabToSpace, setActiveSpace, allBookmarkSpaceFolders, createSpaceFromInactive);
+        showTabContextMenu(
+            e.pageX,
+            e.pageY,
+            tab,
+            isPinned,
+            isBookmarkOnly,
+            tabElement,
+            closeTab,
+            spaces,
+            moveTabToSpace,
+            setActiveSpace,
+            allBookmarkSpaceFolders,
+            createSpaceFromInactive,
+            replaceBookmarkUrlWithCurrentUrl
+        );
     });
 
     return tabElement;
@@ -3056,6 +3269,7 @@ function handleTabUpdate(tabId, changeInfo, tab) {
                         space.spaceBookmarks = space.spaceBookmarks.filter(id => id !== tabId);
                         space.temporaryTabs = space.temporaryTabs.filter(id => id !== tabId);
                     });
+                    await Utils.removePinnedTabState(tabId);
                     saveSpaces();
                     tabElement.remove(); // Remove from space
                 } else {
@@ -3073,17 +3287,24 @@ function handleTabUpdate(tabId, changeInfo, tab) {
                     const override = overrides[tabId]; // Use potentially new URL
                     Logger.log('override', override); // Log the override object here
                     let displayDomain = null;
+                    const pinnedUrl = tabElement.dataset.pinnedUrl || (await Utils.getPinnedTabState(tabId))?.pinnedUrl || null;
+                    const isNavigatedAway = Boolean(pinnedUrl && tab.url && tab.url !== pinnedUrl);
 
-                    if (override) {
+                    // Only force override title when we're still on the pinned URL.
+                    if (override && !isNavigatedAway) {
                         displayTitle = override.name;
+                    }
+                    titleDisplay.textContent = displayTitle;
+
+                    // Domain subtitle only when navigated away from pinned domain.
+                    if (isNavigatedAway) {
                         try {
+                            const pinnedDomain = new URL(pinnedUrl).hostname;
                             const currentDomain = new URL(tab.url).hostname;
-                            if (currentDomain !== override.originalDomain) {
+                            if (currentDomain && pinnedDomain && currentDomain !== pinnedDomain) {
                                 displayDomain = currentDomain;
                             }
                         } catch (e) { /* Ignore invalid URLs */ }
-                    } else {
-                        titleDisplay.textContent = displayTitle;
                     }
                     if (displayDomain) {
                         domainDisplay.textContent = displayDomain;
@@ -3092,7 +3313,7 @@ function handleTabUpdate(tabId, changeInfo, tab) {
                         domainDisplay.style.display = 'none';
                     }
                     // Update input value only if not focused (might overwrite user typing)
-                    titleInput.value = override ? override.name : tab.title;
+                    titleInput.value = (override && !isNavigatedAway) ? override.name : tab.title;
                 }
             }
             let faviconElement = tabElement.querySelector('.tab-favicon');
@@ -3102,9 +3323,16 @@ function handleTabUpdate(tabId, changeInfo, tab) {
             }
             if (changeInfo.url && faviconElement) {
                 faviconElement.src = Utils.getFaviconUrl(changeInfo.url);
-                // Update bookmark URL if this is a pinned tab
+                // Do NOT auto-overwrite the pinned bookmark URL on navigation.
+                // Instead, make favicon look actionable and show the Arc-like label only on favicon hover.
+                tabElement.dataset.url = tab.url;
                 if (tabElement.closest('[data-tab-type="pinned"]')) {
-                    updateBookmarkForTab(tab, displayTitle);
+                    const pinnedUrl = tabElement.dataset.pinnedUrl || (await Utils.getPinnedTabState(tabId))?.pinnedUrl;
+                    const shouldEnableBack = Boolean(pinnedUrl && tab.url && tab.url !== pinnedUrl);
+                    faviconElement.classList.toggle('pinned-back', shouldEnableBack);
+                    faviconElement.title = shouldEnableBack ? 'Back to Pinned URL' : '';
+                    const slash = tabElement.querySelector('.tab-url-changed-slash');
+                    if (slash) slash.classList.toggle('visible', shouldEnableBack);
                 }
             } else if (!faviconElement) {
                 Logger.log('No favicon element found', faviconElement, tabElement);
@@ -3123,6 +3351,7 @@ function handleTabUpdate(tabId, changeInfo, tab) {
 
 async function handleTabRemove(tabId) {
     Logger.log('Tab removed:', tabId);
+    await Utils.removePinnedTabState(tabId);
     // Get tab element before removing it
     const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
     if (!tabElement) return;

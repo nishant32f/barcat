@@ -289,6 +289,14 @@ export const BookmarkUtils = {
                 }
                 saveSpaces();
             }
+
+            // Track pinned URL/bookmarkId for Arc-like "Back to Pinned URL" behavior.
+            if (Utils && typeof Utils.setPinnedTabState === 'function') {
+                await Utils.setPinnedTabState(newTab.id, {
+                    pinnedUrl: bookmarkData.url,
+                    bookmarkId: bookmarkData.bookmarkId || null
+                });
+            }
         }
 
         // Ensure the tab is placed in the correct position inside the group:
@@ -304,7 +312,9 @@ export const BookmarkUtils = {
                 title: bookmarkData.title,
                 url: bookmarkData.url,
                 favIconUrl: newTab.favIconUrl,
-                spaceName: bookmarkData.spaceName
+                spaceName: bookmarkData.spaceName,
+                pinnedUrl: bookmarkData.url,
+                bookmarkId: bookmarkData.bookmarkId || null
             };
             const activeTabElement = await createTabElement(activeTabData, true, false);
             activeTabElement.classList.add('active');

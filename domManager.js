@@ -150,7 +150,7 @@ export function activateSpaceInDOM(spaceId, spaces, updateSpaceSwitcher) {
     updateSpaceSwitcher();
 }
 
-export function showTabContextMenu(x, y, tab, isPinned, isBookmarkOnly, tabElement, closeTab, spaces, moveTabToSpace, setActiveSpace, allBookmarkSpaceFolders, createSpaceFromInactive) {
+export function showTabContextMenu(x, y, tab, isPinned, isBookmarkOnly, tabElement, closeTab, spaces, moveTabToSpace, setActiveSpace, allBookmarkSpaceFolders, createSpaceFromInactive, onReplaceBookmarkUrlWithCurrent = null) {
     // Remove any existing context menus
     const existingMenu = document.getElementById('tab-context-menu');
     if (existingMenu) {
@@ -185,6 +185,23 @@ export function showTabContextMenu(x, y, tab, isPinned, isBookmarkOnly, tabEleme
             contextMenu.remove();
         });
         contextMenu.appendChild(pinInSpaceOption);
+
+        // Arc-like: allow updating the underlying space bookmark URL to the current tab URL.
+        if (isPinned && typeof onReplaceBookmarkUrlWithCurrent === 'function') {
+            const replaceBookmarkUrlOption = document.createElement('div');
+            replaceBookmarkUrlOption.className = 'context-menu-item';
+            replaceBookmarkUrlOption.textContent = 'Replace Bookmark URL with Current URL';
+            replaceBookmarkUrlOption.addEventListener('click', async () => {
+                try {
+                    await onReplaceBookmarkUrlWithCurrent(tab, tabElement);
+                } catch (e) {
+                    Logger.warn('[ContextMenu] Failed to replace bookmark URL with current URL:', e);
+                } finally {
+                    contextMenu.remove();
+                }
+            });
+            contextMenu.appendChild(replaceBookmarkUrlOption);
+        }
 
         // Add a separator
         const separator = document.createElement('div');
