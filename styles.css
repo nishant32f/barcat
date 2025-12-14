@@ -494,6 +494,8 @@ h3 {
     transition: transform 0.2s;
 }
 
+/* (open-tab indicator is now part of the SVG icon; no pseudo-elements) */
+
 .folder-name {
     flex: 1;
     background: none;
@@ -558,6 +560,17 @@ h3 {
 .folder-content.collapsed {
     display: none;
     min-height: 0px;
+}
+
+/* Arc-like: show open bookmark tabs even when a folder is collapsed */
+.folder-collapsed-tabs {
+    display: none;
+    flex-direction: column;
+    padding: 0px 12px;
+}
+
+.folder.collapsed .folder-collapsed-tabs {
+    display: flex;
 }
 
 .tab-placeholder {

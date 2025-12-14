@@ -14,7 +14,7 @@
  */
 
 import { ChromeHelper } from './chromeHelper.js';
-import { FOLDER_CLOSED_ICON, FOLDER_OPEN_ICON } from './icons.js';
+import { FOLDER_CLOSED_ICON, FOLDER_CLOSED_DOTS_ICON, FOLDER_OPEN_ICON } from './icons.js';
 import { LocalStorage } from './localstorage.js';
 import { Utils } from './utils.js';
 import { setupDOMElements, showSpaceNameInput, activateTabInDOM, activateSpaceInDOM, showTabContextMenu, showArchivedTabsPopup, setupQuickPinListener } from './domManager.js';
@@ -1299,7 +1299,7 @@ function openFolder(folderElement) {
 
     // Update icon to show folder is open
     if (folderIcon) {
-        folderIcon.innerHTML = FOLDER_OPEN_ICON;
+    updateFolderIcon(folderElement);
     }
 }
 
@@ -1539,6 +1539,53 @@ function updateFolderPlaceholder(folderElement) {
         placeholder.classList.add('hidden');
         Logger.log('Hiding placeholder for populated folder');
     }
+}
+
+function updateFolderIcon(folderElement) {
+    if (!folderElement) return;
+    const folderIcon = folderElement.querySelector('.folder-icon');
+    if (!folderIcon) return;
+    const isCollapsed = folderElement.classList.contains('collapsed');
+    const hasOpenTabs = folderElement.classList.contains('has-open-tabs');
+    folderIcon.innerHTML = isCollapsed
+        ? (hasOpenTabs ? FOLDER_CLOSED_DOTS_ICON : FOLDER_CLOSED_ICON)
+        : FOLDER_OPEN_ICON;
+}
+
+// Arc-like: when a folder is collapsed, show open bookmark tabs (active Chrome tabs) for that folder.
+// Implementation detail: we MOVE the existing open tab elements between containers (no duplicates),
+// so tab updates/active highlighting continue to work consistently.
+function syncCollapsedFolderTabs(folderElement) {
+    if (!folderElement) return;
+    const collapsedContainer = folderElement.querySelector('.folder-collapsed-tabs');
+    const folderContent = folderElement.querySelector('.folder-content');
+    if (!collapsedContainer || !folderContent) return;
+
+    const isCollapsed = folderElement.classList.contains('collapsed');
+
+    if (isCollapsed) {
+        // If any bookmark-only tabs ended up in the collapsed container (e.g., tab got closed while collapsed),
+        // move them back into the real folder content so the collapsed view only shows open tabs.
+        Array.from(collapsedContainer.querySelectorAll('.tab.bookmark-only')).forEach(el => {
+            folderContent.appendChild(el);
+        });
+
+        // Move open (non-bookmark-only) tabs out of the hidden folder content into the collapsed container.
+        const openTabs = Array.from(folderContent.querySelectorAll('.tab'))
+            .filter(t => !t.classList.contains('bookmark-only') && t.dataset.tabId);
+        openTabs.forEach(t => collapsedContainer.appendChild(t));
+    } else {
+        // Expanded: move everything back into the folder content.
+        Array.from(collapsedContainer.querySelectorAll('.tab')).forEach(t => folderContent.appendChild(t));
+    }
+
+    // Arc-like: indicate collapsed folder contains an open tab
+    const hasOpenTabs = isCollapsed && Boolean(collapsedContainer.querySelector('.tab:not(.bookmark-only)'));
+    folderElement.classList.toggle('has-open-tabs', hasOpenTabs);
+    updateFolderIcon(folderElement);
+
+    // Recompute placeholder visibility now that DOM contents may have changed.
+    updateFolderPlaceholder(folderElement);
 }
 
 // Update all pinned section placeholders in the current space (folders + main section)
@@ -2366,7 +2413,9 @@ async function loadTabs(space, pinnedContainer, tempContainer) {
                             folderElement.classList.toggle('collapsed');
                             folderContent.classList.toggle('collapsed');
                             folderToggle.classList.toggle('collapsed');
-                            folderIcon.innerHTML = folderElement.classList.contains('collapsed') ? FOLDER_CLOSED_ICON : FOLDER_OPEN_ICON;
+                            updateFolderIcon(folderElement);
+                            updateFolderIcon(folderElement);
+                            syncCollapsedFolderTabs(folderElement);
                         });
 
                         // Add double-click functionality for folder name editing
@@ -2429,6 +2478,8 @@ async function loadTabs(space, pinnedContainer, tempContainer) {
 
                         // Update folder placeholder state after loading contents
                         updateFolderPlaceholder(folderElement);
+                        // Initial sync for collapsed folders (template starts collapsed).
+                        syncCollapsedFolderTabs(folderElement);
                     } else {
                         // This is a bookmark
                         if (!processedUrls.has(item.url) && !pinnedUrls.has(item.url)) {
@@ -2607,8 +2658,10 @@ async function closeTab(tabElement, tab, isPinned = false, isBookmarkOnly = fals
                 favIconUrl: tab.favIconUrl,
                 spaceName: tab.spaceName
             };
+            const parentFolder = tabElement.closest('.folder');
             const inactiveTabElement = await createTabElement(bookmarkTab, true, true);
             tabElement.replaceWith(inactiveTabElement);
+            if (parentFolder) syncCollapsedFolderTabs(parentFolder);
 
             chrome.tabs.remove(tab.id);
 
@@ -3431,6 +3484,7 @@ async function handleTabRemove(tabId) {
                     // Preserve folder context - replace in the same DOM location
                     const parentFolder = tabElement.closest('.folder');
                     tabElement.replaceWith(bookmarkElement);
+                    if (parentFolder) syncCollapsedFolderTabs(parentFolder);
 
                     // Update folder placeholder state if the tab was in a folder
                     if (parentFolder) {
