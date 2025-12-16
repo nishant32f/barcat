@@ -62,6 +62,7 @@ async function saveOptions() {
   const autoArchiveIdleMinutesInput = document.getElementById('autoArchiveIdleMinutes');
   const invertTabOrderCheckbox = document.getElementById('invertTabOrder');
   const enableSpotlightCheckbox = document.getElementById('enableSpotlight');
+  const showAllOpenTabsInCollapsedFoldersCheckbox = document.getElementById('showAllOpenTabsInCollapsedFolders');
   const debugLoggingEnabledCheckbox = document.getElementById('debugLoggingEnabled');
 
   // Get color overrides
@@ -80,6 +81,7 @@ async function saveOptions() {
     autoArchiveIdleMinutes: parseInt(autoArchiveIdleMinutesInput.value, 10) || 360,
     invertTabOrder: invertTabOrderCheckbox.checked,
     enableSpotlight: enableSpotlightCheckbox.checked,
+    showAllOpenTabsInCollapsedFolders: showAllOpenTabsInCollapsedFoldersCheckbox ? showAllOpenTabsInCollapsedFoldersCheckbox.checked : false,
     colorOverrides: Object.keys(colorOverrides).length > 0 ? colorOverrides : null,
     debugLoggingEnabled: debugLoggingEnabledCheckbox ? debugLoggingEnabledCheckbox.checked : false
   };
@@ -122,6 +124,7 @@ async function restoreOptions() {
   const autoArchiveIdleMinutesInput = document.getElementById('autoArchiveIdleMinutes');
   const invertTabOrderCheckbox = document.getElementById('invertTabOrder');
   const enableSpotlightCheckbox = document.getElementById('enableSpotlight');
+  const showAllOpenTabsInCollapsedFoldersCheckbox = document.getElementById('showAllOpenTabsInCollapsedFolders');
   const debugLoggingEnabledCheckbox = document.getElementById('debugLoggingEnabled');
 
   // Populate spaces dropdown
@@ -132,6 +135,9 @@ async function restoreOptions() {
   updateAutoArchiveIdleMinutesVisibility(settings.autoArchiveEnabled);
   invertTabOrderCheckbox.checked = settings.invertTabOrder !== undefined ? settings.invertTabOrder : true; // Default true
   enableSpotlightCheckbox.checked = settings.enableSpotlight !== undefined ? settings.enableSpotlight : true; // Default true
+  if (showAllOpenTabsInCollapsedFoldersCheckbox) {
+    showAllOpenTabsInCollapsedFoldersCheckbox.checked = settings.showAllOpenTabsInCollapsedFolders !== undefined ? settings.showAllOpenTabsInCollapsedFolders : false; // Default false
+  }
   if (debugLoggingEnabledCheckbox) {
     debugLoggingEnabledCheckbox.checked = settings.debugLoggingEnabled !== undefined ? settings.debugLoggingEnabled : false; // Default false
   }
@@ -250,6 +256,11 @@ function setupAutoSave() {
   const enableSpotlightCheckbox = document.getElementById('enableSpotlight');
   if (enableSpotlightCheckbox) {
     enableSpotlightCheckbox.addEventListener('change', saveOptions);
+  }
+
+  const showAllOpenTabsInCollapsedFoldersCheckbox = document.getElementById('showAllOpenTabsInCollapsedFolders');
+  if (showAllOpenTabsInCollapsedFoldersCheckbox) {
+    showAllOpenTabsInCollapsedFoldersCheckbox.addEventListener('change', saveOptions);
   }
 
   const debugLoggingEnabledCheckbox = document.getElementById('debugLoggingEnabled');

@@ -84,6 +84,7 @@ const Utils = {
             invertTabOrder: true, // Default: enabled (New tabs/High index on top)
             colorOverrides: null, // Default: no color overrides
             debugLoggingEnabled: false, // Default: disabled (controls debug logging)
+            showAllOpenTabsInCollapsedFolders: false, // Default: Arc behavior (only show active tab in collapsed folder)
             // ... other settings ...
         };
         const result = await chrome.storage.sync.get(defaultSettings);
