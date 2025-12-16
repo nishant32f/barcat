@@ -46,6 +46,10 @@ let currentWindow = null;
 let defaultSpaceName = 'Home';
 let showAllOpenTabsInCollapsedFolders = false; // default Arc behavior is false (active-only)
 let activeChromeTabId = null;
+// Arc-like behavior: track which tabs have been active in each collapsed folder.
+// These tabs stay visible until user manually opens/closes the folder.
+// WeakMap<HTMLElement (folder), Set<number (tabId)>>
+const collapsedFolderShownTabs = new WeakMap();
 
 // Helper function to update bookmark for a tab
 async function updateBookmarkForTab(tab, bookmarkTitle) {
@@ -1603,12 +1607,29 @@ function syncCollapsedFolderTabs(folderElement) {
                 .filter(t => !t.classList.contains('bookmark-only') && t.dataset.tabId);
             openTabs.forEach(t => collapsedContainer.appendChild(t));
         } else {
-            // Arc mode: show ONLY the currently active tab (at most one) when folder is collapsed.
+            // Arc mode: show tabs that are active OR were previously active while folder was collapsed.
+            // This list resets when user manually opens/closes the folder.
+            let shownTabIds = collapsedFolderShownTabs.get(folderElement);
+            
+            // Also seed the currently active tab if it's in this folder (handles initialization case).
             if (activeChromeTabId) {
-                const activeEl = folderContent.querySelector(`.tab[data-tab-id="${activeChromeTabId}"]:not(.bookmark-only)`);
-                if (activeEl) {
-                    collapsedContainer.appendChild(activeEl);
+                const activeTabEl = folderContent.querySelector(`.tab[data-tab-id="${activeChromeTabId}"]:not(.bookmark-only)`);
+                if (activeTabEl) {
+                    if (!shownTabIds) {
+                        shownTabIds = new Set();
+                        collapsedFolderShownTabs.set(folderElement, shownTabIds);
+                    }
+                    shownTabIds.add(activeChromeTabId);
                 }
+            }
+            
+            if (shownTabIds && shownTabIds.size > 0) {
+                shownTabIds.forEach(tabId => {
+                    const tabEl = folderContent.querySelector(`.tab[data-tab-id="${tabId}"]:not(.bookmark-only)`);
+                    if (tabEl) {
+                        collapsedContainer.appendChild(tabEl);
+                    }
+                });
             }
         }
     } else {
@@ -2346,10 +2367,13 @@ async function createNewFolder(spaceElement) {
     folderTitle.style.display = 'none';
 
     folderHeader.addEventListener('click', () => {
+        // Clear the tracked shown tabs when user manually toggles the folder (Arc behavior).
+        collapsedFolderShownTabs.delete(folderElement);
         folderElement.classList.toggle('collapsed');
         folderContent.classList.toggle('collapsed');
         folderToggle.classList.toggle('collapsed');
         folderIcon.innerHTML = folderElement.classList.contains('collapsed') ? FOLDER_CLOSED_ICON : FOLDER_OPEN_ICON;
+        syncCollapsedFolderTabs(folderElement);
     });
 
     // Set up folder name input
@@ -2473,6 +2497,8 @@ async function loadTabs(space, pinnedContainer, tempContainer) {
                         setupFolderContextMenu(folderElement, space, item);
 
                         folderHeader.addEventListener('click', () => {
+                            // Clear the tracked shown tabs when user manually toggles the folder (Arc behavior).
+                            collapsedFolderShownTabs.delete(folderElement);
                             folderElement.classList.toggle('collapsed');
                             folderContent.classList.toggle('collapsed');
                             folderToggle.classList.toggle('collapsed');
@@ -3480,6 +3506,15 @@ async function handleTabRemove(tabId) {
     const tabElement = document.querySelector(`[data-tab-id="${tabId}"]`);
     if (!tabElement) return;
     Logger.log("tabElement", tabElement);
+
+    // Clean up the tabId from collapsedFolderShownTabs to prevent memory leaks from stale IDs.
+    const parentFolder = tabElement.closest('.folder');
+    if (parentFolder) {
+        const shownTabIds = collapsedFolderShownTabs.get(parentFolder);
+        if (shownTabIds) {
+            shownTabIds.delete(tabId);
+        }
+    }
     const activeSpace = spaces.find(s => s.id === activeSpaceId);
     Logger.log("activeSpace", activeSpace);
     const isPinned = activeSpace.spaceBookmarks.find(id => id === tabId) != null;
@@ -3734,6 +3769,23 @@ function handleTabActivated(activeInfo) {
         } else {
             // Activate only the tab in the current space
             activateTabInDOM(activeInfo.tabId);
+        }
+
+        // Arc-like behavior: if this tab is inside a collapsed folder, add it to the folder's shown tabs set.
+        // This makes the tab stay visible in the collapsed folder until user manually opens/closes the folder.
+        if (!showAllOpenTabsInCollapsedFolders) {
+            const tabElement = document.querySelector(`.tab[data-tab-id="${activeInfo.tabId}"]`);
+            if (tabElement) {
+                const parentFolder = tabElement.closest('.folder');
+                if (parentFolder && parentFolder.classList.contains('collapsed')) {
+                    let shownTabIds = collapsedFolderShownTabs.get(parentFolder);
+                    if (!shownTabIds) {
+                        shownTabIds = new Set();
+                        collapsedFolderShownTabs.set(parentFolder, shownTabIds);
+                    }
+                    shownTabIds.add(activeInfo.tabId);
+                }
+            }
         }
 
         // Update collapsed-folder projections to follow Arc behavior (active-only) unless user enabled "show all open".
