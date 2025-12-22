@@ -232,6 +232,81 @@ function reapplySpaceColors() {
     sidebarContainer.style.setProperty('--space-bg-color-dark', colorDarkValue);
 }
 
+// Sync favorites order to bookmarks (for cross-device sync)
+async function syncFavoritesOrderToBookmarks() {
+    try {
+        const pinnedFavicons = document.getElementById('pinnedFavicons');
+        const faviconElements = pinnedFavicons.querySelectorAll('.pinned-favicon');
+
+        // Get URLs in current DOM order
+        const orderedUrls = [];
+        for (const el of faviconElements) {
+            const tabId = parseInt(el.dataset.tabId);
+            try {
+                const tab = await chrome.tabs.get(tabId);
+                if (tab && tab.url) {
+                    orderedUrls.push(tab.url);
+                }
+            } catch (e) {
+                // Tab might have been closed
+            }
+        }
+
+        if (orderedUrls.length > 0) {
+            await LocalStorage.reorderFavoriteBookmarks(orderedUrls);
+            Logger.log('[Favorites] Synced order to bookmarks');
+        }
+    } catch (error) {
+        Logger.error('[Favorites] Error syncing favorites order:', error);
+    }
+}
+
+// Restore favorites from bookmarks on startup (for cross-device sync)
+async function restoreFavoritesFromBookmarks() {
+    try {
+        const favoriteBookmarks = await LocalStorage.getFavoriteBookmarks();
+        if (favoriteBookmarks.length === 0) {
+            Logger.log('[Favorites] No favorite bookmarks to restore');
+            return;
+        }
+
+        const currentWindow = await chrome.windows.getCurrent();
+        const pinnedTabs = await chrome.tabs.query({ pinned: true, windowId: currentWindow.id });
+        const pinnedUrls = new Set(pinnedTabs.map(t => t.url));
+
+        Logger.log('[Favorites] Restoring favorites from bookmarks:', favoriteBookmarks.length);
+
+        for (const bookmark of favoriteBookmarks) {
+            // Skip if already pinned
+            if (pinnedUrls.has(bookmark.url)) {
+                Logger.log('[Favorites] Already pinned:', bookmark.title);
+                continue;
+            }
+
+            // Check if there's an existing tab with this URL that we can pin
+            const existingTabs = await chrome.tabs.query({ url: bookmark.url, windowId: currentWindow.id });
+            if (existingTabs.length > 0) {
+                // Pin the existing tab
+                await chrome.tabs.update(existingTabs[0].id, { pinned: true });
+                Logger.log('[Favorites] Pinned existing tab:', bookmark.title);
+            } else {
+                // Create and pin a new tab
+                const newTab = await chrome.tabs.create({
+                    url: bookmark.url,
+                    pinned: true,
+                    active: false,
+                    windowId: currentWindow.id
+                });
+                Logger.log('[Favorites] Created pinned tab:', bookmark.title);
+            }
+        }
+
+        Logger.log('[Favorites] Finished restoring favorites');
+    } catch (error) {
+        Logger.error('[Favorites] Error restoring favorites from bookmarks:', error);
+    }
+}
+
 // Function to update pinned favicons
 async function updatePinnedFavicons() {
     const pinnedFavicons = document.getElementById('pinnedFavicons');
@@ -384,6 +459,9 @@ async function updatePinnedFavicons() {
                     // Fallback: append to end
                     pinnedFavicons.appendChild(draggingElement);
                 }
+
+                // Sync reordered favorites to bookmarks for cross-device sync
+                syncFavoritesOrderToBookmarks();
             } else {
                 // Dragging a regular tab to make it pinned
                 const afterElement = getDragAfterElementFavicon(pinnedFavicons, e.clientX);
@@ -404,6 +482,10 @@ async function updatePinnedFavicons() {
                 // Step 1: Pin the tab (this adds it to the end by default)
                 await chrome.tabs.update(tabId, { pinned: true });
 
+                // Step 1.5: Sync to bookmarks for cross-device sync
+                const tab = await chrome.tabs.get(tabId);
+                await LocalStorage.addFavoriteBookmark(tab.url, tab.title);
+
                 // Step 2: Move it to the correct position if needed
                 if (targetIndex !== undefined && targetIndex >= 0) {
                     try {
@@ -415,6 +497,10 @@ async function updatePinnedFavicons() {
 
                 // Step 3: Update the favicon display
                 updatePinnedFavicons();
+
+                // Step 4: Sync order to bookmarks for cross-device sync
+                // Use setTimeout to ensure DOM is updated before syncing
+                setTimeout(() => syncFavoritesOrderToBookmarks(), 100);
 
                 // Hide placeholder if this was an empty container
                 if (afterElement && afterElement.classList.contains('pinned-placeholder-container')) {
@@ -532,6 +618,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     });
 
     initSidebar();
+    await restoreFavoritesFromBookmarks(); // Restore favorites from bookmarks on startup
     updatePinnedFavicons(); // Initial load of pinned favicons
 
     // Add Chrome tab event listeners
@@ -1686,11 +1773,14 @@ function updatePinnedSectionPlaceholders() {
 async function convertFavoriteToTab(draggingElement, targetIsPinned) {
     const tabId = parseInt(draggingElement.dataset.tabId);
 
+    // Get tab data before unpinning
+    const tab = await chrome.tabs.get(tabId);
+
     // Unpin from Chrome favorites
     await chrome.tabs.update(tabId, { pinned: false });
 
-    // Get fresh tab data and create proper UI element
-    const tab = await chrome.tabs.get(tabId);
+    // Remove from favorites bookmarks for cross-device sync
+    await LocalStorage.removeFavoriteBookmark(tab.url);
     const newTabElement = await createTabElement(tab, targetIsPinned, false);
 
     // Replace the small favicon with full tab element
@@ -1873,8 +1963,14 @@ async function handleBookmarkOperations(event, draggingElement, container, targe
     } else if (draggingElement && draggingElement.classList.contains('pinned-favicon') && draggingElement.dataset.tabId) {
         const tabId = parseInt(draggingElement.dataset.tabId);
         try {
+            // Get tab data before unpinning for bookmark removal
+            const tab = await chrome.tabs.get(tabId);
+
             // 1. Unpin the tab from Chrome favorites
             await chrome.tabs.update(tabId, { pinned: false });
+
+            // 2. Remove from favorites bookmarks for cross-device sync
+            await LocalStorage.removeFavoriteBookmark(tab.url);
 
             // Update all folder placeholders after conversion
             updatePinnedSectionPlaceholders();

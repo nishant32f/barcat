@@ -22,6 +22,104 @@ const LocalStorage = {
         }
         return folder;
     },
+
+    // Get or create the Favorites folder for synced pinned tabs
+    getOrCreateFavoritesFolder: async function () {
+        const barCatFolder = await this.getOrCreateBarCatFolder();
+        const children = await chrome.bookmarks.getChildren(barCatFolder.id);
+        let favoritesFolder = children.find((f) => f.title === '_Favorites' && !f.url);
+
+        if (!favoritesFolder) {
+            favoritesFolder = await chrome.bookmarks.create({
+                parentId: barCatFolder.id,
+                title: '_Favorites',
+                index: 0 // Put it at the top
+            });
+            Logger.log('[LocalStorage] Created _Favorites folder:', favoritesFolder.id);
+        }
+        return favoritesFolder;
+    },
+
+    // Add a favorite bookmark (when pinning a tab)
+    addFavoriteBookmark: async function (url, title) {
+        try {
+            const favoritesFolder = await this.getOrCreateFavoritesFolder();
+
+            // Check if bookmark already exists
+            const children = await chrome.bookmarks.getChildren(favoritesFolder.id);
+            const existing = children.find(b => b.url === url);
+
+            if (!existing) {
+                const bookmark = await chrome.bookmarks.create({
+                    parentId: favoritesFolder.id,
+                    title: title,
+                    url: url
+                });
+                Logger.log('[LocalStorage] Added favorite bookmark:', title, url);
+                return bookmark;
+            } else {
+                Logger.log('[LocalStorage] Favorite already exists:', title);
+                return existing;
+            }
+        } catch (error) {
+            Logger.error('[LocalStorage] Error adding favorite bookmark:', error);
+            return null;
+        }
+    },
+
+    // Remove a favorite bookmark (when unpinning a tab)
+    removeFavoriteBookmark: async function (url) {
+        try {
+            const favoritesFolder = await this.getOrCreateFavoritesFolder();
+            const children = await chrome.bookmarks.getChildren(favoritesFolder.id);
+            const bookmark = children.find(b => b.url === url);
+
+            if (bookmark) {
+                await chrome.bookmarks.remove(bookmark.id);
+                Logger.log('[LocalStorage] Removed favorite bookmark:', url);
+                return true;
+            }
+            return false;
+        } catch (error) {
+            Logger.error('[LocalStorage] Error removing favorite bookmark:', error);
+            return false;
+        }
+    },
+
+    // Get all favorite bookmarks
+    getFavoriteBookmarks: async function () {
+        try {
+            const favoritesFolder = await this.getOrCreateFavoritesFolder();
+            const children = await chrome.bookmarks.getChildren(favoritesFolder.id);
+            return children.filter(b => b.url); // Only return actual bookmarks, not folders
+        } catch (error) {
+            Logger.error('[LocalStorage] Error getting favorite bookmarks:', error);
+            return [];
+        }
+    },
+
+    // Reorder favorite bookmarks to match current pinned tab order
+    reorderFavoriteBookmarks: async function (orderedUrls) {
+        try {
+            const favoritesFolder = await this.getOrCreateFavoritesFolder();
+            const children = await chrome.bookmarks.getChildren(favoritesFolder.id);
+
+            // Move bookmarks to match the order
+            for (let i = 0; i < orderedUrls.length; i++) {
+                const bookmark = children.find(b => b.url === orderedUrls[i]);
+                if (bookmark) {
+                    await chrome.bookmarks.move(bookmark.id, {
+                        parentId: favoritesFolder.id,
+                        index: i
+                    });
+                }
+            }
+            Logger.log('[LocalStorage] Reordered favorite bookmarks');
+        } catch (error) {
+            Logger.error('[LocalStorage] Error reordering favorite bookmarks:', error);
+        }
+    },
+
     getOrCreateSpaceFolder: async function (spaceName) {
         const arcifyFolder = await this.getOrCreateBarCatFolder();
         const children = await chrome.bookmarks.getChildren(arcifyFolder.id);
@@ -158,8 +256,8 @@ const LocalStorage = {
                 // Get all children of the BarCat folder
                 const children = await chrome.bookmarks.getChildren(arcifyFolder.id);
 
-                // Filter for folders only (not bookmarks) and extract names
-                const folders = children.filter(item => !item.url);
+                // Filter for folders only (not bookmarks) and exclude _Favorites
+                const folders = children.filter(item => !item.url && item.title !== '_Favorites');
                 folders.forEach(folder => {
                     spaceNames.add(folder.title);
                 });

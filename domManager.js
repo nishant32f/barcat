@@ -15,6 +15,7 @@
 import { Utils } from './utils.js';
 import { RESTORE_ICON } from './icons.js';
 import { Logger } from './logger.js';
+import { LocalStorage } from './localstorage.js';
 
 // DOM Elements
 const spacesList = document.getElementById('spacesList');
@@ -173,6 +174,8 @@ export function showTabContextMenu(x, y, tab, isPinned, isBookmarkOnly, tabEleme
         addToFavoritesOption.textContent = 'Add to Favorites';
         addToFavoritesOption.addEventListener('click', async () => {
             await chrome.tabs.update(tab.id, { pinned: true });
+            // Sync to bookmarks for cross-device sync
+            await LocalStorage.addFavoriteBookmark(tab.url, tab.title);
             contextMenu.remove();
         });
         contextMenu.appendChild(addToFavoritesOption);
