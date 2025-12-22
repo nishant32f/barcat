@@ -1,4 +1,4 @@
 import { defineConfig } from 'vite';
-import { createArcifyConfig } from './vite-plugins/vite-plugin-arcify-extension.js';
+import { createBarCatConfig } from './vite-plugins/vite-plugin-arcify-extension.js';
 
-export default defineConfig(createArcifyConfig({ isDev: false })); 
+export default defineConfig(createBarCatConfig({ isDev: false })); 

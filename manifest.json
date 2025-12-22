@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Arcify: Arc like vertical tab spaces",
-  "version": "4.0.3",
-  "description": "A sidebar extension that replicates Arc browser's tab management system",
+  "name": "BarCat - Arc-Style Sidebar",
+  "version": "2.0.0",
+  "description": "Arc browser-style sidebar with spaces, tab groups, pinned tabs, and drag & drop management",
   "permissions": [
     "tabs",
     "tabGroups",
@@ -60,14 +60,16 @@
     }
   ],
   "icons": {
-    "128": "assets/icon.png"
+    "16": "assets/icon16.png",
+    "48": "assets/icon48.png",
+    "128": "assets/icon128.png"
   },
   "commands": {
     "_execute_action": {
       "suggested_key": {
         "default": "Alt+S"
       },
-      "description": "Toggle side panel"
+      "description": "Toggle CatBar sidebar"
     },
     "quickPinToggle": {
       "suggested_key": {
@@ -76,16 +78,16 @@
       "description": "Quick Pin/Unpin Tab"
     },
     "NextTabInSpace": {
-      "description": "Navigates to next tab in space"
+      "description": "Navigate to next tab in space"
     },
     "PrevTabInSpace": {
-      "description": "Navigates to prev tab in space"
+      "description": "Navigate to previous tab in space"
     },
     "toggleSpotlight": {
       "suggested_key": {
         "default": "Alt+L"
       },
-      "description": "Current Tab URL"
+      "description": "Open Spotlight"
     },
     "toggleSpotlightNewTab": {
       "suggested_key": {

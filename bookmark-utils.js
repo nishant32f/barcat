@@ -1,12 +1,12 @@
 /**
- * Bookmark Utils - Consolidated bookmark operations for Arcify Chrome Extension
+ * Bookmark Utils - Consolidated bookmark operations for BarCat Chrome Extension
  * 
  * Purpose: Centralized utilities for all bookmark-related operations to eliminate code duplication
- * Key Functions: Arcify folder management, recursive traversal, URL matching, bookmark operations
+ * Key Functions: BarCat folder management, recursive traversal, URL matching, bookmark operations
  * Architecture: Static utility class with consistent error handling and Chrome API abstraction
  * 
  * Critical Notes:
- * - Uses robust 3-method fallback approach for finding Arcify folder
+ * - Uses robust 3-method fallback approach for finding BarCat folder
  * - Provides unified recursive traversal with flexible options
  * - Centralizes URL matching logic with normalization
  * - Ensures consistent error handling across all bookmark operations
@@ -18,23 +18,23 @@ import { Logger } from './logger.js';
 export const BookmarkUtils = {
 
     /**
-     * Robust method to find the Arcify folder in Chrome bookmarks
+     * Robust method to find the BarCat folder in Chrome bookmarks
      * Uses 3-method fallback approach for maximum reliability across browsers/locales
-     * @returns {Promise<Object|null>} The Arcify folder object or null if not found
+     * @returns {Promise<Object|null>} The BarCat folder object or null if not found
      */
-    async findArcifyFolder() {
-        Logger.log('[BookmarkUtils] Finding Arcify folder...');
+    async findBarCatFolder() {
+        Logger.log('[BookmarkUtils] Finding BarCat folder...');
 
         try {
             // Method 1: Try the standard search first (this should work in most cases)
-            Logger.log('[BookmarkUtils] Method 1: Searching for Arcify folder by title...');
-            const searchResults = await chrome.bookmarks.search({ title: 'Arcify' });
+            Logger.log('[BookmarkUtils] Method 1: Searching for BarCat folder by title...');
+            const searchResults = await chrome.bookmarks.search({ title: 'BarCat' });
 
             if (searchResults && searchResults.length > 0) {
                 // Verify this is actually a folder (not a bookmark)
                 const arcifyFolder = searchResults.find(result => !result.url);
                 if (arcifyFolder) {
-                    Logger.log('[BookmarkUtils] Found Arcify folder via search:', arcifyFolder.id);
+                    Logger.log('[BookmarkUtils] Found BarCat folder via search:', arcifyFolder.id);
                     return arcifyFolder;
                 }
             }
@@ -46,16 +46,16 @@ export const BookmarkUtils = {
             const rootChildren = await chrome.bookmarks.getChildren('0');
             Logger.log('[BookmarkUtils] Root folders found:', rootChildren.map(child => ({ id: child.id, title: child.title })));
 
-            // Check each root folder for Arcify folder
+            // Check each root folder for BarCat folder
             for (const rootFolder of rootChildren) {
                 Logger.log(`[BookmarkUtils] Checking folder: ${rootFolder.title} (ID: ${rootFolder.id})`);
 
                 try {
                     const children = await chrome.bookmarks.getChildren(rootFolder.id);
-                    const arcifyFolder = children.find(child => child.title === 'Arcify' && !child.url);
+                    const arcifyFolder = children.find(child => child.title === 'BarCat' && !child.url);
 
                     if (arcifyFolder) {
-                        Logger.log(`[BookmarkUtils] Found Arcify folder in ${rootFolder.title}:`, arcifyFolder.id);
+                        Logger.log(`[BookmarkUtils] Found BarCat folder in ${rootFolder.title}:`, arcifyFolder.id);
                         return arcifyFolder;
                     }
                 } catch (error) {
@@ -79,10 +79,10 @@ export const BookmarkUtils = {
 
                 try {
                     const otherBookmarksChildren = await chrome.bookmarks.getChildren(otherBookmarksFolder.id);
-                    const arcifyFolder = otherBookmarksChildren.find(child => child.title === 'Arcify' && !child.url);
+                    const arcifyFolder = otherBookmarksChildren.find(child => child.title === 'BarCat' && !child.url);
 
                     if (arcifyFolder) {
-                        Logger.log('[BookmarkUtils] Found Arcify folder in Other Bookmarks:', arcifyFolder.id);
+                        Logger.log('[BookmarkUtils] Found BarCat folder in Other Bookmarks:', arcifyFolder.id);
                         return arcifyFolder;
                     }
                 } catch (error) {
@@ -90,11 +90,11 @@ export const BookmarkUtils = {
                 }
             }
 
-            Logger.log('[BookmarkUtils] All methods failed - Arcify folder not found');
+            Logger.log('[BookmarkUtils] All methods failed - BarCat folder not found');
             return null;
 
         } catch (error) {
-            Logger.error('[BookmarkUtils] Error in findArcifyFolder:', error);
+            Logger.error('[BookmarkUtils] Error in findBarCatFolder:', error);
             return null;
         }
     },
@@ -419,9 +419,9 @@ export const BookmarkUtils = {
 
         try {
             // Find the space folder - don't create it, that's LocalStorage's responsibility
-            const arcifyFolder = await this.findArcifyFolder();
+            const arcifyFolder = await this.findBarCatFolder();
             if (!arcifyFolder) {
-                Logger.error(`[BookmarkUtils] Arcify folder not found for space ${activeSpace.name}.`);
+                Logger.error(`[BookmarkUtils] BarCat folder not found for space ${activeSpace.name}.`);
                 return false;
             }
 
@@ -469,20 +469,20 @@ export const BookmarkUtils = {
     },
 
     /**
-     * Check if a bookmark is under the Arcify folder hierarchy
+     * Check if a bookmark is under the BarCat folder hierarchy
      * @param {Object} bookmark - Bookmark object
-     * @param {string} arcifyFolderId - Arcify folder ID
-     * @returns {boolean} True if bookmark is under Arcify folder
+     * @param {string} arcifyFolderId - BarCat folder ID
+     * @returns {boolean} True if bookmark is under BarCat folder
      */
-    isUnderArcifyFolder(bookmark, arcifyFolderId) {
-        // Simple heuristic: check if the bookmark's parent path includes the Arcify folder
+    isUnderBarCatFolder(bookmark, arcifyFolderId) {
+        // Simple heuristic: check if the bookmark's parent path includes the BarCat folder
         // This is a simplified check - for a more robust solution, we'd need to traverse up the parent chain
         return bookmark.parentId && (bookmark.parentId === arcifyFolderId ||
             bookmark.parentId.startsWith(arcifyFolderId));
     },
 
     /**
-     * Get bookmarks data with Arcify folder exclusion
+     * Get bookmarks data with BarCat folder exclusion
      * @param {string} query - Search query
      * @returns {Promise<Array>} Filtered bookmarks array
      */
@@ -490,23 +490,23 @@ export const BookmarkUtils = {
         try {
             const bookmarks = await chrome.bookmarks.search(query);
 
-            // Get Arcify folder to exclude its bookmarks from regular bookmark search
+            // Get BarCat folder to exclude its bookmarks from regular bookmark search
             let arcifyFolderId = null;
             try {
-                const arcifyFolder = await this.findArcifyFolder();
+                const arcifyFolder = await this.findBarCatFolder();
                 if (arcifyFolder) {
                     arcifyFolderId = arcifyFolder.id;
                 }
             } catch (error) {
-                // Ignore error if Arcify folder doesn't exist
+                // Ignore error if BarCat folder doesn't exist
             }
 
-            // Filter out Arcify bookmarks and keep only bookmarks with URLs
+            // Filter out BarCat bookmarks and keep only bookmarks with URLs
             const filteredBookmarks = bookmarks.filter(bookmark => {
                 if (!bookmark.url) return false;
 
-                // Exclude bookmarks that are under Arcify folder
-                if (arcifyFolderId && this.isUnderArcifyFolder(bookmark, arcifyFolderId)) {
+                // Exclude bookmarks that are under BarCat folder
+                if (arcifyFolderId && this.isUnderBarCatFolder(bookmark, arcifyFolderId)) {
                     return false;
                 }
 

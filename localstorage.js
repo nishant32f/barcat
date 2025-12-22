@@ -2,11 +2,11 @@
  * LocalStorage - Bookmark-based persistence and Chrome storage utilities
  * 
  * Purpose: Manages space bookmarks and provides legacy storage compatibility
- * Key Functions: Arcify bookmark folder management, space bookmark operations, storage synchronization
+ * Key Functions: BarCat bookmark folder management, space bookmark operations, storage synchronization
  * Architecture: Static utility object for bookmark-based data persistence
  * 
  * Critical Notes:
- * - Creates and manages "Arcify" bookmark folder for space persistence
+ * - Creates and manages "BarCat" bookmark folder for space persistence
  * - Provides bookmark-based storage as alternative to chrome.storage
  * - Used for space bookmark functionality (separate from main space data in chrome.storage)
  * - Handles bookmark folder creation and organization automatically
@@ -15,15 +15,15 @@
 import { Logger } from './logger.js';
 
 const LocalStorage = {
-    getOrCreateArcifyFolder: async function () {
-        let [folder] = await chrome.bookmarks.search({ title: 'Arcify' });
+    getOrCreateBarCatFolder: async function () {
+        let [folder] = await chrome.bookmarks.search({ title: 'BarCat' });
         if (!folder) {
-            folder = await chrome.bookmarks.create({ title: 'Arcify' });
+            folder = await chrome.bookmarks.create({ title: 'BarCat' });
         }
         return folder;
     },
     getOrCreateSpaceFolder: async function (spaceName) {
-        const arcifyFolder = await this.getOrCreateArcifyFolder();
+        const arcifyFolder = await this.getOrCreateBarCatFolder();
         const children = await chrome.bookmarks.getChildren(arcifyFolder.id);
         let spaceFolder = children.find((f) => f.title === spaceName);
 
@@ -80,9 +80,9 @@ const LocalStorage = {
     mergeDuplicateSpaceFolders: async function () {
         Logger.log("Checking for duplicate space folders...");
         try {
-            const [arcifyFolder] = await chrome.bookmarks.search({ title: 'Arcify' });
+            const [arcifyFolder] = await chrome.bookmarks.search({ title: 'BarCat' });
             if (!arcifyFolder) {
-                Logger.log("Arcify folder not found.");
+                Logger.log("BarCat folder not found.");
                 return;
             }
 
@@ -147,15 +147,15 @@ const LocalStorage = {
         });
     },
 
-    // Get all space names from Arcify bookmark folders (source of truth)
+    // Get all space names from BarCat bookmark folders (source of truth)
     getSpaceNames: async function () {
         let spaceNames = new Set(); // Use Set to automatically deduplicate
 
         try {
-            // Get the Arcify folder
-            const arcifyFolder = await this.getOrCreateArcifyFolder();
+            // Get the BarCat folder
+            const arcifyFolder = await this.getOrCreateBarCatFolder();
             if (arcifyFolder) {
-                // Get all children of the Arcify folder
+                // Get all children of the BarCat folder
                 const children = await chrome.bookmarks.getChildren(arcifyFolder.id);
 
                 // Filter for folders only (not bookmarks) and extract names
@@ -164,7 +164,7 @@ const LocalStorage = {
                     spaceNames.add(folder.title);
                 });
 
-                Logger.log('Found spaces from Arcify bookmark folders:', spaceNames.size);
+                Logger.log('Found spaces from BarCat bookmark folders:', spaceNames.size);
             }
         } catch (bookmarkError) {
             Logger.log('Could not get spaces from bookmark folders:', bookmarkError);

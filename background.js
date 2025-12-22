@@ -48,8 +48,8 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 
     if (chrome.contextMenus) {
         chrome.contextMenus.create({
-            id: "openArcify",
-            title: "Arcify",
+            id: "openBarCat",
+            title: "BarCat",
             contexts: ["all"]
         });
     }
@@ -58,7 +58,7 @@ chrome.runtime.onInstalled.addListener(async (details) => {
 // Handle context menu clicks
 if (chrome.contextMenus) {
     chrome.contextMenus.onClicked.addListener((info, tab) => {
-        info.menuItemId === "openArcify" && chrome.sidePanel.open({
+        info.menuItemId === "openBarCat" && chrome.sidePanel.open({
             windowId: tab.windowId
         })
     });

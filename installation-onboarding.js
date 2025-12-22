@@ -62,7 +62,7 @@ class InstallationOnboarding {
         if (this.currentStep === 3) {
             await this.loadKeyboardShortcuts();
 
-            // Redirect to arcify.io when next is clicked on step 3 (Spotlight)
+            // Redirect to barcat.app when next is clicked on step 3 (Spotlight)
             // Pass keyboard shortcuts as URL parameters
             const urlParams = new URLSearchParams();
 
@@ -82,8 +82,8 @@ class InstallationOnboarding {
 
             const queryString = urlParams.toString();
             const redirectUrl = queryString
-                ? `https://arcify.io?${queryString}`
-                : 'https://arcify.io';
+                ? `https://barcat.app?${queryString}`
+                : 'https://barcat.app';
 
             window.location.href = redirectUrl;
             return;
@@ -284,7 +284,7 @@ class InstallationOnboarding {
                 <div style="display: flex; align-items: center; justify-content: center; height: 100vh; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);">
                     <div style="background: white; padding: 3rem; border-radius: 16px; text-align: center; box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);">
                         <h1 style="color: #007AFF; margin-bottom: 1rem;">Setup Complete!</h1>
-                        <p style="color: #666; margin-bottom: 2rem;">You can now close this window and start using Arcify.</p>
+                        <p style="color: #666; margin-bottom: 2rem;">You can now close this window and start using BarCat.</p>
                         <button onclick="window.close()" style="background: #007AFF; color: white; border: none; padding: 1rem 2rem; border-radius: 8px; cursor: pointer;">Close Window</button>
                     </div>
                 </div>

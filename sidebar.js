@@ -54,7 +54,7 @@ const collapsedFolderShownTabs = new WeakMap();
 // Helper function to update bookmark for a tab
 async function updateBookmarkForTab(tab, bookmarkTitle) {
     Logger.log("updating bookmark", tab, bookmarkTitle);
-    const arcifyFolder = await LocalStorage.getOrCreateArcifyFolder();
+    const arcifyFolder = await LocalStorage.getOrCreateBarCatFolder();
     const spaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
 
     for (const spaceFolder of spaceFolders) {
@@ -98,7 +98,7 @@ async function replaceBookmarkUrlWithCurrentUrl(tab, tabElement) {
 
     const newUrl = liveTab?.url || tabElement?.dataset?.url || tab?.url || null;
     if (!newUrl) {
-        console.warn('[Arcify] Replace bookmark URL failed: missing current tab URL', { tabId: tab.id });
+        console.warn('[BarCat] Replace bookmark URL failed: missing current tab URL', { tabId: tab.id });
         return;
     }
     const newTitle = liveTab?.title || tab?.title || null;
@@ -112,7 +112,7 @@ async function replaceBookmarkUrlWithCurrentUrl(tab, tabElement) {
     if (!resolvedBookmarkId && pinnedUrl) {
         const activeSpace = spaces.find(s => s.id === activeSpaceId);
         if (activeSpace) {
-            const arcifyFolder = await LocalStorage.getOrCreateArcifyFolder();
+            const arcifyFolder = await LocalStorage.getOrCreateBarCatFolder();
             const spaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
             const spaceFolder = spaceFolders.find(f => f.title === activeSpace.name);
             if (spaceFolder) {
@@ -123,7 +123,7 @@ async function replaceBookmarkUrlWithCurrentUrl(tab, tabElement) {
     }
 
     if (!resolvedBookmarkId) {
-        console.warn('[Arcify] Cannot replace bookmark URL: missing bookmarkId and unable to resolve.', {
+        console.warn('[BarCat] Cannot replace bookmark URL: missing bookmarkId and unable to resolve.', {
             tabId: tab.id,
             pinnedUrl,
             dataset: tabElement?.dataset
@@ -137,7 +137,7 @@ async function replaceBookmarkUrlWithCurrentUrl(tab, tabElement) {
         if (newTitle) updatePayload.title = newTitle;
         await chrome.bookmarks.update(resolvedBookmarkId, updatePayload);
     } catch (e) {
-        console.error('[Arcify] chrome.bookmarks.update failed', { bookmarkId: resolvedBookmarkId, newUrl, error: e });
+        console.error('[BarCat] chrome.bookmarks.update failed', { bookmarkId: resolvedBookmarkId, newUrl, error: e });
         return;
     }
 
@@ -455,7 +455,7 @@ async function activatePinnedTabByURL(bookmarkUrl, targetSpaceId, spaceName) {
             const existingBookmarkElement = document.querySelector(`[data-url="${bookmarkUrl}"].bookmark-only`);
 
             // Find the bookmark to get the correct title
-            const arcifyFolder = await LocalStorage.getOrCreateArcifyFolder();
+            const arcifyFolder = await LocalStorage.getOrCreateBarCatFolder();
             const spaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
             const spaceFolder = spaceFolders.find(f => f.title === spaceName);
 
@@ -628,7 +628,7 @@ async function initSidebar() {
         await LocalStorage.mergeDuplicateSpaceFolders();
 
         // Create bookmarks folder for spaces if it doesn't exist
-        const spacesFolder = await LocalStorage.getOrCreateArcifyFolder();
+        const spacesFolder = await LocalStorage.getOrCreateBarCatFolder();
         Logger.log("spacesFolder", spacesFolder);
         const subFolders = await chrome.bookmarks.getChildren(spacesFolder.id);
         Logger.log("subFolders", subFolders);
@@ -1129,7 +1129,7 @@ async function updateSpaceSwitcher() {
     });
 
     // Inactive space from bookmarks
-    const arcifyFolder = await LocalStorage.getOrCreateArcifyFolder();
+    const arcifyFolder = await LocalStorage.getOrCreateBarCatFolder();
     const spaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
     spaceFolders.forEach(spaceFolder => {
         if (spaces.find(space => space.name == spaceFolder.title)) {
@@ -1419,7 +1419,7 @@ async function createSpaceFromInactive(spaceName, tabToMove) {
     Logger.log(`Creating inactive space "${spaceName}" with tab:`, tabToMove);
     isCreatingSpace = true;
     try {
-        const arcifyFolder = await LocalStorage.getOrCreateArcifyFolder();
+        const arcifyFolder = await LocalStorage.getOrCreateBarCatFolder();
         const spaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
         const spaceFolder = spaceFolders.find(f => f.title === spaceName);
 
@@ -1515,7 +1515,7 @@ async function moveTabToPinned(space, tab) {
 }
 
 async function moveTabToTemp(space, tab) {
-    const arcifyFolder = await LocalStorage.getOrCreateArcifyFolder();
+    const arcifyFolder = await LocalStorage.getOrCreateBarCatFolder();
     const spaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
     const spaceFolder = spaceFolders.find(f => f.title === space.name);
 
@@ -1602,7 +1602,7 @@ function syncCollapsedFolderTabs(folderElement) {
         });
 
         if (showAllOpenTabsInCollapsedFolders) {
-            // Arcify mode: show all open (non-bookmark-only) tabs even when folder is collapsed.
+            // BarCat mode: show all open (non-bookmark-only) tabs even when folder is collapsed.
             const openTabs = Array.from(folderContent.querySelectorAll('.tab'))
                 .filter(t => !t.classList.contains('bookmark-only') && t.dataset.tabId);
             openTabs.forEach(t => collapsedContainer.appendChild(t));
@@ -2015,7 +2015,7 @@ async function reconcileSpaceTabOrdering(spaceId, opts = {}) {
     const tabsInGroupSet = new Set(groupTabsUnpinned.map(t => t.id));
 
     // If Chrome initiated the reorder, update temporary order from Chrome's current order.
-    // We keep bookmark ordering stable (Arcify/bookmark-folder is the canonical ordering),
+    // We keep bookmark ordering stable (BarCat/bookmark-folder is the canonical ordering),
     // but enforce the boundary by moving any moved bookmark tab to the end of the bookmark block.
     if (source === 'chrome') {
         const bookmarkSet = new Set(space.spaceBookmarks ?? []);
@@ -2046,7 +2046,7 @@ async function reconcileSpaceTabOrdering(spaceId, opts = {}) {
     if (!isSameOrder) {
         const groupStartIndex = groupTabsUnpinned[0].index;
         try {
-            // Mark as syncing to prevent Chrome->Arcify loops, but unmark immediately on failure.
+            // Mark as syncing to prevent Chrome->BarCat loops, but unmark immediately on failure.
             markTabsSyncingToChrome(desiredGroupOrder);
             await chrome.tabs.move(desiredGroupOrder, { index: groupStartIndex });
             Logger.log('[ReconcileOrder] ✓ Reordered group', spaceId, {
@@ -2104,10 +2104,10 @@ async function reconcileSpaceTabOrdering(spaceId, opts = {}) {
 }
 
 /**
- * Called after an Arcify drag+drop to update the space model (spaceBookmarks/temporaryTabs)
+ * Called after an BarCat drag+drop to update the space model (spaceBookmarks/temporaryTabs)
  * from the DOM, then reconcile Chrome ordering accordingly.
  */
-async function handleArcifyOrderChangeAfterDropByTabId(tabId, container) {
+async function handleBarCatOrderChangeAfterDropByTabId(tabId, container) {
     if (!tabId || !container) return;
     const spaceElement = container.closest('.space');
     if (!spaceElement) return;
@@ -2268,10 +2268,10 @@ async function setupDragAndDrop(pinnedContainer, tempContainer) {
                     syncCollapsedFolderTabs(targetFolderElement);
                 }
 
-                // Update the model from the DOM (Arcify is source of truth here), then reconcile Chrome.
+                // Update the model from the DOM (BarCat is source of truth here), then reconcile Chrome.
                 // This is intentionally done after bookmark operations so section membership is correct.
                 if (droppedTabId) {
-                    await handleArcifyOrderChangeAfterDropByTabId(droppedTabId, container);
+                    await handleBarCatOrderChangeAfterDropByTabId(droppedTabId, container);
                 }
             }
         });
@@ -2467,7 +2467,7 @@ async function loadTabs(space, pinnedContainer, tempContainer) {
         const pinnedTabs = await chrome.tabs.query({ pinned: true });
         const pinnedUrls = new Set(pinnedTabs.map(tab => tab.url));
 
-        const arcifyFolder = await LocalStorage.getOrCreateArcifyFolder();
+        const arcifyFolder = await LocalStorage.getOrCreateBarCatFolder();
         const spaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
         const spaceFolder = spaceFolders.find(f => f.title == space.name);
 
@@ -2700,7 +2700,7 @@ async function closeTab(tabElement, tab, isPinned = false, isBookmarkOnly = fals
 
     if (isBookmarkOnly) {
         // Remove from bookmarks
-        const arcifyFolder = await LocalStorage.getOrCreateArcifyFolder();
+        const arcifyFolder = await LocalStorage.getOrCreateBarCatFolder();
         const spaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
         const activeSpace = spaces.find(s => s.id === activeSpaceId);
 
@@ -2735,7 +2735,7 @@ async function closeTab(tabElement, tab, isPinned = false, isBookmarkOnly = fals
     const isCurrentlyTemporary = activeSpace?.temporaryTabs.includes(tab.id);
     Logger.log("isCurrentlyPinned", isCurrentlyPinned, "isCurrentlyTemporary", isCurrentlyTemporary, "isPinned", isPinned);
     if (isCurrentlyPinned || (isPinned && !isCurrentlyTemporary)) {
-        const arcifyFolder = await LocalStorage.getOrCreateArcifyFolder();
+        const arcifyFolder = await LocalStorage.getOrCreateBarCatFolder();
         const spaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
 
         const spaceFolder = spaceFolders.find(f => f.title === activeSpace.name);
@@ -3215,7 +3215,7 @@ async function createTabElement(tab, isPinned = false, isBookmarkOnly = false) {
     // --- Context Menu ---
     tabElement.addEventListener('contextmenu', async (e) => {
         e.preventDefault();
-        const arcifyFolder = await LocalStorage.getOrCreateArcifyFolder();
+        const arcifyFolder = await LocalStorage.getOrCreateBarCatFolder();
         const allBookmarkSpaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
         showTabContextMenu(
             e.pageX,
@@ -3405,7 +3405,7 @@ function handleTabUpdate(tabId, changeInfo, tab) {
 
                     // If tab was in a space and was bookmarked, remove it from bookmarks
                     if (spaceWithTab && spaceWithTab.spaceBookmarks.includes(tabId)) {
-                        const arcifyFolder = await LocalStorage.getOrCreateArcifyFolder();
+                        const arcifyFolder = await LocalStorage.getOrCreateBarCatFolder();
                         const spaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
                         const spaceFolder = spaceFolders.find(f => f.title === spaceWithTab.name);
 
@@ -3524,7 +3524,7 @@ async function handleTabRemove(tabId) {
         // For pinned tabs, convert to bookmark-only element using existing bookmark data
         try {
             // Find the bookmark in Chrome bookmarks for this space
-            const arcifyFolder = await LocalStorage.getOrCreateArcifyFolder();
+            const arcifyFolder = await LocalStorage.getOrCreateBarCatFolder();
             const spaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
             const spaceFolder = spaceFolders.find(f => f.title === activeSpace.name);
 
@@ -3820,7 +3820,7 @@ async function deleteSpace(spaceId) {
         }
 
         // Delete bookmark folder for this space
-        const arcifyFolder = await LocalStorage.getOrCreateArcifyFolder();
+        const arcifyFolder = await LocalStorage.getOrCreateBarCatFolder();
         const spaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
         const spaceFolder = spaceFolders.find(f => f.title === space.name);
         await chrome.bookmarks.removeTree(spaceFolder.id);
@@ -4093,7 +4093,7 @@ function setupFolderContextMenu(folderElement, space, item = null) {
         deleteOption.textContent = 'Delete Folder';
         deleteOption.addEventListener('click', async () => {
             if (confirm('Are you sure you want to delete this folder and all its contents?')) {
-                const arcifyFolder = await LocalStorage.getOrCreateArcifyFolder();
+                const arcifyFolder = await LocalStorage.getOrCreateBarCatFolder();
                 const spaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
                 const spaceFolder = spaceFolders.find(f => f.title === space.name);
                 if (spaceFolder) {
