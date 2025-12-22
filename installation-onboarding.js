@@ -59,36 +59,6 @@ class InstallationOnboarding {
     }
 
     async nextStep() {
-        if (this.currentStep === 3) {
-            await this.loadKeyboardShortcuts();
-
-            // Redirect to barcat.app when next is clicked on step 3 (Spotlight)
-            // Pass keyboard shortcuts as URL parameters
-            const urlParams = new URLSearchParams();
-
-            // Map extension command names to URL parameter names
-            if (this.shortcuts['_execute_action']) {
-                urlParams.set('toggle-sidepanel', this.shortcuts['_execute_action']);
-            }
-            if (this.shortcuts['toggleSpotlight']) {
-                urlParams.set('spotlight-search', this.shortcuts['toggleSpotlight']);
-            }
-            if (this.shortcuts['quickPinToggle']) {
-                urlParams.set('switch-spaces', this.shortcuts['quickPinToggle']);
-            }
-            if (this.shortcuts['toggleSpotlightNewTab']) {
-                urlParams.set('new-tab', this.shortcuts['toggleSpotlightNewTab']);
-            }
-
-            const queryString = urlParams.toString();
-            const redirectUrl = queryString
-                ? `https://barcat.app?${queryString}`
-                : 'https://barcat.app';
-
-            window.location.href = redirectUrl;
-            return;
-        }
-
         if (this.currentStep < this.totalSteps) {
             this.goToStep(this.currentStep + 1);
         } else {
