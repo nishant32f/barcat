@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "BarCat - Arc-Style Sidebar",
+  "name": "BarCat",
   "version": "2.0.0",
   "description": "Arc browser-style sidebar with spaces, tab groups, pinned tabs, and drag & drop management",
   "permissions": [
@@ -22,9 +22,6 @@
     "default_path": "sidebar.html"
   },
   "action": {},
-  "chrome_url_overrides": {
-    "newtab": "spotlight/newtab.html"
-  },
   "background": {
     "service_worker": "background.js",
     "type": "module"
