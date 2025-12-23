@@ -264,7 +264,10 @@ async function syncFavoritesOrderToBookmarks() {
 // Restore favorites from bookmarks on startup (for cross-device sync)
 async function restoreFavoritesFromBookmarks() {
     try {
+        Logger.log('[Favorites] Starting restore from bookmarks...');
         const favoriteBookmarks = await LocalStorage.getFavoriteBookmarks();
+        Logger.log('[Favorites] Found bookmarks:', favoriteBookmarks.map(b => ({ title: b.title, url: b.url })));
+
         if (favoriteBookmarks.length === 0) {
             Logger.log('[Favorites] No favorite bookmarks to restore');
             return;
@@ -273,21 +276,35 @@ async function restoreFavoritesFromBookmarks() {
         const currentWindow = await chrome.windows.getCurrent();
         const pinnedTabs = await chrome.tabs.query({ pinned: true, windowId: currentWindow.id });
         const pinnedUrls = new Set(pinnedTabs.map(t => t.url));
+        Logger.log('[Favorites] Currently pinned URLs:', [...pinnedUrls]);
 
         Logger.log('[Favorites] Restoring favorites from bookmarks:', favoriteBookmarks.length);
 
         for (const bookmark of favoriteBookmarks) {
-            // Skip if already pinned
-            if (pinnedUrls.has(bookmark.url)) {
+            // Skip if already pinned (check with and without trailing slash)
+            const urlVariants = [bookmark.url, bookmark.url.replace(/\/$/, ''), bookmark.url + '/'];
+            const isAlreadyPinned = urlVariants.some(url => pinnedUrls.has(url));
+
+            if (isAlreadyPinned) {
                 Logger.log('[Favorites] Already pinned:', bookmark.title);
                 continue;
             }
 
             // Check if there's an existing tab with this URL that we can pin
-            const existingTabs = await chrome.tabs.query({ url: bookmark.url, windowId: currentWindow.id });
-            if (existingTabs.length > 0) {
+            // Use URL pattern matching to be more flexible
+            let existingTab = null;
+            try {
+                const existingTabs = await chrome.tabs.query({ url: bookmark.url + '*', windowId: currentWindow.id });
+                existingTab = existingTabs[0];
+            } catch (e) {
+                // URL pattern might fail, try exact match
+                const existingTabs = await chrome.tabs.query({ windowId: currentWindow.id });
+                existingTab = existingTabs.find(t => t.url && t.url.startsWith(bookmark.url.replace(/\/$/, '')));
+            }
+
+            if (existingTab) {
                 // Pin the existing tab
-                await chrome.tabs.update(existingTabs[0].id, { pinned: true });
+                await chrome.tabs.update(existingTab.id, { pinned: true });
                 Logger.log('[Favorites] Pinned existing tab:', bookmark.title);
             } else {
                 // Create and pin a new tab
@@ -297,7 +314,7 @@ async function restoreFavoritesFromBookmarks() {
                     active: false,
                     windowId: currentWindow.id
                 });
-                Logger.log('[Favorites] Created pinned tab:', bookmark.title);
+                Logger.log('[Favorites] Created pinned tab:', bookmark.title, newTab.id);
             }
         }
 
