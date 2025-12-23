@@ -1219,6 +1219,10 @@ async function updateSpaceSwitcher() {
     const arcifyFolder = await LocalStorage.getOrCreateBarCatFolder();
     const spaceFolders = await chrome.bookmarks.getChildren(arcifyFolder.id);
     spaceFolders.forEach(spaceFolder => {
+        // Skip _Favorites folder - it's not a space
+        if (spaceFolder.title === '_Favorites') {
+            return;
+        }
         if (spaces.find(space => space.name == spaceFolder.title)) {
             return;
         } else {
@@ -2576,6 +2580,10 @@ async function loadTabs(space, pinnedContainer, tempContainer) {
 
                 const itemsToRender = invertTabOrder ? [...bookmarks].reverse() : bookmarks;
                 for (const item of itemsToRender) {
+                    // Skip _Favorites folder - it's for synced favorites, not a space folder
+                    if (!item.url && item.title === '_Favorites') {
+                        continue;
+                    }
                     if (!item.url) {
                         // This is a folder
                         const folderTemplate = document.getElementById('folderTemplate');
